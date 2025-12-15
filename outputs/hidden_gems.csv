@@ -1,0 +1,50 @@
+movieId,avg_rating,std_rating,num_ratings,title,genres,release_year,gem_score
+165969,4.4333334,0.6229729,15,HyperNormalisation (2016),Documentary,2016.0,3.7683333873748777
+27033,4.46875,0.49895725,16,"Kingdom II, The (Riget II) (1997)",Drama|Horror|Mystery,1997.0,3.7537499999999997
+92475,4.40625,0.55433893,16,All Watched Over by Machines of Loving Grace (2011),Documentary,2011.0,3.70125
+8484,4.266667,1.1781745,15,"Human Condition I, The (Ningen no joken I) (1959)",Drama|War,1959.0,3.6266668558120725
+79798,4.266667,0.6229729,15,I Killed My Mother (J'ai tué ma mère) (2009),Drama,2009.0,3.6266668558120725
+140265,4.266667,0.6510065,15,George Carlin: Jammin' in New York (1992),Comedy,1992.0,3.6266668558120725
+96966,4.233333,0.67788184,15,Laurence Anyways (2012),Drama|Romance,2012.0,3.598333144187927
+252710,4.25,0.70710677,16,Attack On Titan (2013),Action|Adventure|Animation|Fantasy|Sci-Fi,2013.0,3.57
+87004,4.2,0.8618916,15,Pina (2011),Documentary|Musical,2011.0,3.569999837875366
+85312,4.2647057,0.68733287,17,"House of Small Cubes, The (Tsumiki no ie) (2008)",Animation|Drama,2008.0,3.539705696105957
+27423,4.2647057,0.90342486,17,"O Auto da Compadecida (Dog's Will, A) (2000)",Adventure|Comedy,2000.0,3.539705696105957
+41627,4.2058825,0.5320604,17,Samurai Rebellion (Jôi-uchi: Hairyô tsuma shimatsu) (1967),Action|Drama,1967.0,3.4908825159072876
+126090,4.2894735,0.8218507,19,Hedgehog in the Fog (1975),Animation,1975.0,3.474473562240601
+169218,4.3809524,0.68747294,21,God's Own Country (2017),Drama|Romance,2017.0,3.460952363014221
+170777,4.3,0.83350873,20,There Once Was a Dog (1982),Animation|Children|Comedy,1982.0,3.4400001525878907
+7304,4.3,0.5938279,20,Allegro non troppo (1977),Animation|Comedy|Fantasy|Musical,1977.0,3.4400001525878907
+157373,4.3,0.7677719,20,It's Such a Beautiful Day (2011),Animation|Comedy|Drama,2011.0,3.4400001525878907
+105250,4.409091,0.5903261,22,"Century of the Self, The (2002)",Documentary,2002.0,3.439090976715088
+100044,4.4347825,0.64498675,23,Human Planet (2011),Documentary,2011.0,3.414782528877258
+107412,4.3636365,0.90213794,22,"Kidnapping, Caucasian Style (Kavkazskaya plennitsa) (1967)",Comedy|Romance,1967.0,3.403636465072632
+602,4.3913045,0.6563764,23,"Great Day in Harlem, A (1994)",Documentary,1994.0,3.3813044595718384
+159849,4.2619047,0.73517084,21,Bo Burnham: Make Happy (2016),Comedy,2016.0,3.3669047260284426
+196067,4.2619047,0.53895843,21,The Dawn Wall (2018),Adventure|Documentary,2018.0,3.3669047260284426
+135456,4.375,0.4484272,24,Ghost in the Shell: Stand Alone Complex - The Laughing Man (2005),Action|Animation|Crime|Sci-Fi,2005.0,3.325
+53883,4.25,0.7519815,22,"Power of Nightmares, The: The Rise of the Politics of Fear (2004)",Documentary,2004.0,3.315
+286897,4.2708335,0.9888417,24,Spider-Man: Across the Spider-Verse (2023),Action|Adventure|Animation|Sci-Fi,2023.0,3.24583345413208
+89554,4.3,0.7772816,25,Zindagi Na Milegi Dobara (2011),Adventure|Comedy|Drama|Romance,2011.0,3.2250001430511475
+58425,4.3076925,0.5491252,26,Heima (2007),Documentary,2007.0,3.187692470550537
+130970,4.2884617,0.6351862,26,George Carlin: Life Is Worth Losing (2005),Comedy,2005.0,3.173461647033691
+6896,4.2,0.98952854,25,Shoah (1985),Documentary|War,1985.0,3.1499998569488525
+182723,4.529412,0.63890505,34,Cosmos: A Spacetime Odissey,(no genres listed),,2.9894117832183835
+26578,4.3088236,0.6032074,34,"Sacrifice, The (Offret - Sacraficatio) (1986)",Drama,1986.0,2.8438235664367673
+33779,4.212121,1.0534935,33,Eddie Izzard: Dress to Kill (1999),Comedy,1999.0,2.822121076583862
+2931,4.263889,0.7414861,36,Time of the Gypsies (Dom za vesanje) (1989),Comedy|Crime|Drama|Fantasy,1989.0,2.7288888549804686
+93040,4.216216,1.1151764,37,"Civil War, The (1990)",Documentary|War,1990.0,2.6562161350250246
+26712,4.216216,0.50745195,37,35 Up (1991),Documentary,1991.0,2.6562161350250246
+171495,4.452381,0.7555447,42,Cosmos,(no genres listed),,2.582381057739258
+129514,4.233333,0.7731282,45,George Carlin: It's Bad for Ya! (2008),Comedy,2008.0,2.3283332109451296
+99764,4.2608695,0.9412706,46,It's Such a Beautiful Day (2012),Animation|Comedy|Drama|Fantasy|Sci-Fi,2012.0,2.30086953163147
+95311,4.264151,0.76336664,53,Presto (2008),Animation|Children|Comedy|Fantasy,2008.0,2.004151015281677
+3929,4.207547,0.92733055,53,"Bank Dick, The (1940)",Comedy,1940.0,1.9775471782684324
+163809,4.2288136,0.9017322,59,Over the Garden Wall (2013),Adventure|Animation|Drama,2013.0,1.7338135957717897
+1900,4.220339,0.783841,59,"Children of Heaven, The (Bacheha-Ye Aseman) (1997)",Comedy|Drama,1997.0,1.7303389167785646
+214,4.258333,0.7618647,60,Before the Rain (Pred dozhdot) (1994),Drama|War,1994.0,1.7033332824707033
+176601,4.2537313,1.0953522,67,Black Mirror,(no genres listed),,1.4037313127517699
+198185,4.2132354,0.79792726,68,Twin Peaks (1989),Drama|Mystery,1989.0,1.3482353210449216
+3090,4.2173915,0.68319243,69,Matewan (1987),Drama,1987.0,1.3073913621902469
+2920,4.253521,1.0277342,71,Children of Paradise (Les enfants du paradis) (1945),Drama|Romance,1945.0,1.23352108001709
+26082,4.3333335,0.8436301,75,Harakiri (Seppuku) (1962),Drama,1962.0,1.0833333730697632

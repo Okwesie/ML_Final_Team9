@@ -1,0 +1,12 @@
+{
+  "total_ratings": "2,000,000",
+  "unique_users": "19,651",
+  "unique_movies": "33,129",
+  "avg_rating": "3.54",
+  "ratings_per_user": "101.8",
+  "popular_movies": "3,314",
+  "top_genre": "Drama",
+  "monthly_active_users": "148",
+  "best_model": "Ridge",
+  "model_accuracy": "68.0%"
+}

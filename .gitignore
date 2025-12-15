@@ -1,0 +1,36 @@
+# Large data files
+*.csv
+*.pkl
+*.pickle
+
+# Models directory
+models/
+
+# Data files
+ratings.csv
+genome-scores.csv
+tags.csv
+movies.csv
+links.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
