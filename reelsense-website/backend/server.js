@@ -11,7 +11,6 @@ app.use(cors());
 app.use(express.json());
 
 function callPythonScript(action, args = []) {
-function callPythonScript(action, args = []) {
   return new Promise((resolve, reject) => {
     const options = {
       mode: 'text',
