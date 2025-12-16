@@ -107,7 +107,7 @@ def handle_search(query):
 def handle_similar(movie_id, n=10):
     load_models()
     
-        if 'content_based' not in models:
+    if 'content_based' not in models:
         if movies_df is None:
             return {'error': 'Movies data not found'}
         
@@ -117,6 +117,7 @@ def handle_similar(movie_id, n=10):
                 return {'error': 'Movie not found'}
             
             target_genres = set(target_movie.iloc[0]['genres_list'] if isinstance(target_movie.iloc[0]['genres_list'], list) else [])
+            
             def genre_similarity(row):
                 if row['movieId'] == int(movie_id):
                     return -1
@@ -140,7 +141,6 @@ def handle_similar(movie_id, n=10):
         result = similar.to_dict('records')
         return {'success': True, 'data': result}
     except Exception as e:
-        # Fallback to genre-based similarity
         try:
             target_movie = movies_df[movies_df['movieId'] == int(movie_id)]
             if len(target_movie) == 0:

@@ -22,15 +22,23 @@ function callPythonScript(action, args = []) {
 
     PythonShell.run('predict.py', options, (err, results) => {
       if (err) {
-        reject(err);
+        console.error('Python script error:', err);
+        reject(new Error(`Python error: ${err.message || err}`));
+        return;
+      }
+      
+      if (!results || results.length === 0) {
+        reject(new Error('Python script returned no output'));
         return;
       }
       
       try {
-        const result = JSON.parse(results.join(''));
+        const output = results.join('');
+        const result = JSON.parse(output);
         resolve(result);
       } catch (parseErr) {
-        reject(new Error('Failed to parse Python output'));
+        console.error('Failed to parse Python output:', results);
+        reject(new Error(`Failed to parse Python output: ${parseErr.message}`));
       }
     });
   });

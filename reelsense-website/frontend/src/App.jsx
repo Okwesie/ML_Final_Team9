@@ -27,8 +27,12 @@ function App() {
       const response = await axios.get(`${API_BASE}/recommendations?n=20`);
       if (response.data.success) {
         setTrendingMovies(response.data.data);
+      } else {
+        setError(response.data.error || 'Failed to load trending movies');
+        console.error('API error:', response.data);
       }
     } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to connect to backend. Make sure backend is running on port 5001.');
       console.error('Error loading trending movies:', err);
     } finally {
       setLoading(false);
@@ -51,7 +55,7 @@ function App() {
         setError(response.data.error || 'Search failed');
       }
     } catch (err) {
-      setError(err.message || 'Failed to search movies');
+      setError(err.response?.data?.error || err.message || 'Failed to search movies. Make sure backend is running.');
       console.error('Search error:', err);
     } finally {
       setLoading(false);
@@ -171,8 +175,24 @@ function App() {
           </h2>
           
           {loading && trendingMovies.length === 0 ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="w-16 h-16 border-4 border-purple-accent border-t-transparent rounded-full animate-spin"></div>
+            <div className="flex flex-col justify-center items-center py-20">
+              <div className="w-16 h-16 border-4 border-purple-accent border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-gray-400">Loading trending movies...</p>
+            </div>
+          ) : error && trendingMovies.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-red-400 text-xl mb-2">⚠️ {error}</p>
+              <p className="text-gray-400 text-sm mb-4">Make sure the backend server is running on port 5001</p>
+              <button
+                onClick={loadTrendingMovies}
+                className="px-6 py-2 bg-netflix-red rounded-full text-white font-semibold hover:glow transition-all"
+              >
+                Retry
+              </button>
+            </div>
+          ) : trendingMovies.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-gray-400">No movies available</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">

@@ -16,6 +16,11 @@ A beautiful, modern movie recommendation website powered by machine learning mod
 ```bash
 cd backend
 npm install
+
+# Install Python dependencies
+pip3 install -r requirements.txt
+# OR if you use conda:
+# conda install pandas numpy scikit-learn joblib
 ```
 
 #### 2. Frontend Setup
