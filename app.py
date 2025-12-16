@@ -189,222 +189,177 @@ class ContentBasedRecommender:
         else:
             movie_stats_dict = {}
         
-        # Prepare features for all movies
-        all_features = []
-        movie_ids_list = []
+        # Prepare features for target movie
+        target_features = []
+        target_genres = movie_row.iloc[0]['genres_list'] if isinstance(movie_row.iloc[0]['genres_list'], list) else []
+        target_year = movie_row.iloc[0]['release_year']
+        target_genre_count = movie_row.iloc[0]['genre_count']
         
-        for _, movie in self.movies_df.iterrows():
-            # Get stats or defaults
-            stats = movie_stats_dict.get(movie['movieId'], {})
-            movie_avg = float(stats.get('movie_avg_rating', 3.5) or 3.5)
-            movie_std = float(stats.get('movie_std_rating', 0.5) or 0.5)
-            movie_count = float(stats.get('movie_num_ratings', 10) or 10)
-            
-            # Encode genres
-            genre_encoded = self.mlb.transform([movie['genres_list']])[0]
-            
-            # Build features - convert to float and handle NaN
-            release_year = movie.get('release_year', 0)
-            if pd.isna(release_year):
-                release_year = 0
-            release_year = float(release_year or 0)
-            
-            genre_count = movie.get('genre_count', 0)
-            if pd.isna(genre_count):
-                genre_count = 0
-            genre_count = float(genre_count or 0)
-            
-            features = [
-                release_year,
-                genre_count,
-                movie_avg,
-                movie_std,
-                movie_count
-            ] + genre_encoded.tolist()
-            
-            all_features.append(features)
-            movie_ids_list.append(movie['movieId'])
+        # Add numeric features
+        target_features.extend([
+            target_year,
+            target_genre_count,
+            movie_stats_dict.get(movie_id, {}).get('movie_avg_rating', 0),
+            movie_stats_dict.get(movie_id, {}).get('movie_std_rating', 0),
+            movie_stats_dict.get(movie_id, {}).get('movie_num_ratings', 0)
+        ])
         
-        # Create DataFrame and ensure no NaN
-        all_features_df = pd.DataFrame(all_features, columns=self.feature_names)
-        all_features_df = all_features_df.fillna(0)  # Fill any remaining NaN
+        # Add genre features
+        for genre in self.mlb.classes_:
+            target_features.append(1 if genre in target_genres else 0)
         
         # Scale features
-        all_features_scaled = self.scaler.transform(all_features_df)
-        
-        # Find target movie position
-        target_pos = movie_ids_list.index(movie_id)
-        target_features = all_features_scaled[target_pos:target_pos+1]
+        target_features_scaled = self.scaler.transform([target_features])
         
         # Find similar movies
         if self.model_type == 'knn':
-            distances, indices = self.model.kneighbors(target_features, n_neighbors=n+1)
-            similar_positions = indices[0][1:]  # Exclude target
+            distances, indices = self.model.kneighbors(target_features_scaled, n_neighbors=n+1)
+            similar_indices = indices[0][1:]  # Exclude the movie itself
         else:
-            from sklearn.metrics.pairwise import cosine_similarity
-            similarities = cosine_similarity(target_features, all_features_scaled)[0]
-            sorted_positions = np.argsort(similarities)[::-1]
-            # Exclude target and get top n
-            similar_positions = [p for p in sorted_positions if p != target_pos][:n]
+            # For other models, use feature similarity
+            all_movies = self.movies_df.copy()
+            similarities = []
+            
+            for idx, row in all_movies.iterrows():
+                if row['movieId'] == movie_id:
+                    continue
+                
+                movie_features = []
+                movie_genres = row['genres_list'] if isinstance(row['genres_list'], list) else []
+                
+                # Add numeric features
+                movie_features.extend([
+                    row['release_year'],
+                    row['genre_count'],
+                    movie_stats_dict.get(row['movieId'], {}).get('movie_avg_rating', 0),
+                    movie_stats_dict.get(row['movieId'], {}).get('movie_std_rating', 0),
+                    movie_stats_dict.get(row['movieId'], {}).get('movie_num_ratings', 0)
+                ])
+                
+                # Add genre features
+                for genre in self.mlb.classes_:
+                    movie_features.append(1 if genre in movie_genres else 0)
+                
+                # Calculate cosine similarity
+                movie_features_scaled = self.scaler.transform([movie_features])
+                similarity = np.dot(target_features_scaled[0], movie_features_scaled[0]) / (
+                    np.linalg.norm(target_features_scaled[0]) * np.linalg.norm(movie_features_scaled[0])
+                )
+                similarities.append((row['movieId'], similarity))
+            
+            # Sort by similarity
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            similar_movie_ids = [movie_id for movie_id, _ in similarities[:n]]
+            similar_movies = self.movies_df[self.movies_df['movieId'].isin(similar_movie_ids)]
         
-        # Get similar movie IDs
-        similar_movie_ids = [movie_ids_list[p] for p in similar_positions]
+        # If using KNN
+        if self.model_type == 'knn':
+            # Get movie IDs from training data
+            # This is a simplified version - you'd need to track the mapping
+            similar_movies = self.movies_df.head(n)  # Placeholder
         
-        # Return similar movies
-        similar_movies = self.movies_df[self.movies_df['movieId'].isin(similar_movie_ids)][
-            ['movieId', 'title', 'genres', 'release_year']
-        ].copy()
-        
-        return similar_movies
+        return similar_movies[['movieId', 'title', 'genres', 'release_year']].head(n)
 
-# Page configuration
+# Page configuration must be first Streamlit command
 st.set_page_config(
-    page_title="MovieLens Recommender",
+    page_title="🎬 MovieLens Recommender",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Enhanced CSS with FontAwesome icons and modern dark theme
-# Inject CSS at the very top to ensure it applies
-css_injection = """
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+# Enhanced CSS with animations and gradients
+st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
     
+    /* Global Styles */
     * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: 'Poppins', sans-serif;
     }
     
-    :root {
-        --primary: #E50914;
-        --primary-dark: #B20710;
-        --secondary: #564d4d;
-        --accent: #00D4FF;
-        --accent-green: #46D369;
-        --background: #000000;
-        --surface: #141414;
-        --surface-light: #1f1f1f;
-        --surface-hover: #2a2a2a;
-        --text-primary: #FFFFFF;
-        --text-secondary: #B3B3B3;
-        --text-muted: #808080;
-        --border: rgba(255, 255, 255, 0.1);
-        --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-        --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-        --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-        --gradient-primary: linear-gradient(135deg, #E50914 0%, #B20710 50%, #8B0000 100%);
-        --gradient-secondary: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-        --gradient-accent: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%);
-    }
-    
+    /* Main app background with animated gradient */
     .stApp {
-        background: var(--background);
-        color: var(--text-primary);
+        background: linear-gradient(-45deg, #0a0a0a, #1a0f2e, #0f1c2e, #1a0a1f);
+        background-size: 400% 400%;
+        animation: gradientShift 15s ease infinite;
     }
     
-    .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 1400px;
+    @keyframes gradientShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
     }
     
-    h1, h2, h3, h4, h5, h6 {
-        color: var(--text-primary);
-        font-weight: 700;
-        letter-spacing: -0.02em;
-    }
-    
-    .app-header {
-        background: var(--gradient-primary);
-        padding: 3rem 2rem;
-        border-radius: 16px;
-        margin-bottom: 3rem;
+    /* Animated header */
+    .main-header {
+        background: linear-gradient(135deg, #e50914 0%, #b20710 50%, #8b0000 100%);
+        padding: 2.5rem;
+        border-radius: 20px;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 40px rgba(229, 9, 20, 0.4);
         text-align: center;
-        box-shadow: var(--shadow-lg);
+        animation: headerPulse 3s ease-in-out infinite;
         position: relative;
         overflow: hidden;
     }
     
-    .app-header::before {
+    .main-header::before {
         content: '';
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: radial-gradient(circle at 30% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%);
-        pointer-events: none;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(
+            45deg,
+            transparent,
+            rgba(255, 255, 255, 0.1),
+            transparent
+        );
+        animation: shine 3s infinite;
     }
     
-    .app-header h1 {
+    @keyframes shine {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    @keyframes headerPulse {
+        0%, 100% { box-shadow: 0 10px 40px rgba(229, 9, 20, 0.4); }
+        50% { box-shadow: 0 10px 60px rgba(229, 9, 20, 0.6); }
+    }
+    
+    .main-header h1 {
         color: white;
         font-size: 3.5rem;
         font-weight: 800;
         margin: 0;
-        text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
         position: relative;
         z-index: 1;
     }
     
-    .app-header p {
-        color: rgba(255, 255, 255, 0.95);
+    .main-header p {
+        color: #f5f5f5;
         font-size: 1.3rem;
-        margin-top: 1rem;
-        font-weight: 400;
+        margin-top: 0.8rem;
+        font-weight: 300;
         position: relative;
         z-index: 1;
     }
     
-    .icon-inline {
-        margin-right: 0.5rem;
-        font-size: 1em;
-    }
-    
-    .metric-container {
-        background: var(--gradient-secondary);
-        border-radius: 12px;
-        padding: 2rem;
-        border: 1px solid var(--border);
-        box-shadow: var(--shadow-md);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        height: 100%;
-    }
-    
-    .metric-container:hover {
-        transform: translateY(-4px);
-        box-shadow: var(--shadow-lg);
-        border-color: var(--primary);
-    }
-    
-    .metric-value {
-        font-size: 2.8rem;
-        font-weight: 800;
-        background: var(--gradient-primary);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin: 0.5rem 0;
-        line-height: 1.2;
-    }
-    
-    .metric-label {
-        font-size: 0.95rem;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 600;
-        margin-top: 0.5rem;
-    }
-    
+    /* Movie cards with hover effects */
     .movie-card {
-        background: var(--gradient-secondary);
-        border-radius: 12px;
-        padding: 1.75rem;
-        margin: 1.25rem 0;
-        border-left: 4px solid var(--primary);
-        box-shadow: var(--shadow-sm);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background: linear-gradient(135deg, rgba(30, 30, 50, 0.9), rgba(20, 20, 40, 0.9));
+        backdrop-filter: blur(15px);
+        border-radius: 15px;
+        padding: 1.8rem;
+        margin: 1.2rem 0;
+        border: 1px solid rgba(229, 9, 20, 0.3);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
         position: relative;
         overflow: hidden;
     }
@@ -413,570 +368,622 @@ css_injection = """
         content: '';
         position: absolute;
         top: 0;
-        left: 0;
-        width: 4px;
+        left: -100%;
+        width: 100%;
         height: 100%;
-        background: var(--gradient-primary);
-        transform: scaleY(0);
-        transform-origin: bottom;
-        transition: transform 0.3s ease;
-    }
-    
-    .movie-card:hover {
-        transform: translateX(8px) translateY(-2px);
-        box-shadow: var(--shadow-md);
-        border-left-color: var(--accent);
-        background: var(--surface-hover);
+        background: linear-gradient(90deg, transparent, rgba(229, 9, 20, 0.2), transparent);
+        transition: 0.5s;
     }
     
     .movie-card:hover::before {
-        transform: scaleY(1);
+        left: 100%;
+    }
+    
+    .movie-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 15px 40px rgba(229, 9, 20, 0.5);
+        border-color: #e50914;
     }
     
     .movie-title {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: var(--text-primary);
-        margin-bottom: 0.75rem;
-        line-height: 1.3;
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #ffffff;
+        margin-bottom: 0.8rem;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
     }
     
     .movie-genre {
-        color: var(--accent);
-        font-size: 0.95rem;
-        margin-bottom: 0.75rem;
+        color: #e50914;
+        font-size: 1rem;
+        margin: 0.5rem 0;
         font-weight: 500;
     }
     
     .movie-rating {
-        color: var(--accent-green);
-        font-weight: 700;
-        font-size: 1.15rem;
-        margin-bottom: 0.5rem;
+        color: #ffd700;
+        font-size: 1.1rem;
+        font-weight: 600;
+        text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
     }
     
+    /* Metric cards with gradient backgrounds */
+    .metric-card {
+        background: linear-gradient(135deg, #e50914 0%, #b20710 100%);
+        border-radius: 15px;
+        padding: 1.5rem;
+        text-align: center;
+        color: white;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        transition: all 0.3s ease;
+        animation: float 3s ease-in-out infinite;
+    }
+    
+    @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+    
+    .metric-card:hover {
+        transform: scale(1.05) translateY(-5px);
+        box-shadow: 0 12px 35px rgba(229, 9, 20, 0.6);
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, rgba(15, 15, 30, 0.95), rgba(10, 10, 25, 0.95));
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(229, 9, 20, 0.3);
+    }
+    
+    /* Enhanced buttons */
     .stButton > button {
-        background: var(--gradient-primary);
+        background: linear-gradient(135deg, #e50914 0%, #b20710 100%);
         color: white;
         border: none;
-        border-radius: 10px;
-        padding: 0.875rem 2.5rem;
-        font-weight: 700;
-        font-size: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: var(--shadow-sm);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        padding: 0.8rem 2rem;
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 1.1rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(229, 9, 20, 0.4);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stButton > button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.3);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .stButton > button:hover::before {
+        width: 300px;
+        height: 300px;
     }
     
     .stButton > button:hover {
-        transform: translateY(-3px);
-        box-shadow: var(--shadow-md);
-        background: var(--primary-dark);
+        transform: scale(1.05);
+        box-shadow: 0 6px 25px rgba(229, 9, 20, 0.6);
     }
     
-    .stButton > button:active {
-        transform: translateY(-1px);
-    }
-    
-    .button-primary {
-        background: var(--gradient-primary) !important;
-    }
-    
-    .button-secondary {
-        background: var(--gradient-secondary) !important;
-        border: 1px solid var(--border) !important;
-    }
-    
+    /* Info boxes with gradient borders */
     .info-box {
-        background: rgba(229, 9, 20, 0.08);
-        border-left: 4px solid var(--primary);
+        background: rgba(20, 20, 40, 0.6);
+        border-left: 4px solid #e50914;
         border-radius: 10px;
         padding: 1.5rem;
-        margin: 1.5rem 0;
-        box-shadow: var(--shadow-sm);
-        border-right: 1px solid var(--border);
-        border-top: 1px solid var(--border);
-        border-bottom: 1px solid var(--border);
+        margin: 1rem 0;
+        color: #e0e0e0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        transition: all 0.3s ease;
     }
     
-    .info-box strong {
-        color: var(--text-primary);
-        font-weight: 700;
-        display: block;
-        margin-bottom: 0.75rem;
-        font-size: 1.1rem;
+    .info-box:hover {
+        background: rgba(229, 9, 20, 0.1);
+        transform: translateX(5px);
+        box-shadow: 0 4px 20px rgba(229, 9, 20, 0.4);
     }
     
-    .info-box code {
-        background: rgba(0, 0, 0, 0.3);
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
-        color: var(--accent);
-        font-size: 0.9em;
-    }
-    
+    /* Warning boxes */
     .warning-box {
-        background: rgba(255, 193, 7, 0.1);
-        border-left: 4px solid #FFC107;
+        background: linear-gradient(135deg, rgba(255, 193, 7, 0.2), rgba(255, 152, 0, 0.2));
+        border-left: 4px solid #ffc107;
         border-radius: 10px;
-        padding: 1.25rem;
+        padding: 1.5rem;
         margin: 1rem 0;
-        box-shadow: var(--shadow-sm);
+        color: #fff3cd;
+        animation: pulse 2s infinite;
     }
     
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+    }
+    
+    /* Success boxes */
     .success-box {
-        background: rgba(70, 211, 105, 0.1);
-        border-left: 4px solid var(--accent-green);
+        background: linear-gradient(135deg, rgba(40, 167, 69, 0.2), rgba(25, 135, 84, 0.2));
+        border-left: 4px solid #28a745;
         border-radius: 10px;
-        padding: 1.25rem;
+        padding: 1.5rem;
         margin: 1rem 0;
-        box-shadow: var(--shadow-sm);
+        color: #d4edda;
     }
     
-    .sidebar .sidebar-content {
-        background: var(--surface);
+    /* Platform overview metrics */
+    .platform-metric {
+        text-align: center;
+        padding: 1.5rem;
+        background: linear-gradient(135deg, rgba(229, 9, 20, 0.2), rgba(139, 0, 0, 0.2));
+        border-radius: 15px;
+        border: 1px solid rgba(229, 9, 20, 0.3);
+        transition: all 0.3s ease;
     }
     
-    [data-testid="stSidebar"] {
-        background: var(--surface);
-        border-right: 1px solid var(--border);
+    .platform-metric:hover {
+        transform: scale(1.05);
+        border-color: #e50914;
+        box-shadow: 0 5px 20px rgba(229, 9, 20, 0.4);
     }
     
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-        color: var(--text-primary);
+    .platform-metric-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #e50914;
+        text-shadow: 0 0 20px rgba(229, 9, 20, 0.5);
     }
     
-    .stRadio > div {
-        background: var(--surface-light);
+    .platform-metric-label {
+        font-size: 1rem;
+        color: #b0b0b0;
+        margin-top: 0.5rem;
+    }
+    
+    .platform-metric-status {
+        font-size: 0.9rem;
+        color: #4CAF50;
+        margin-top: 0.3rem;
+        font-weight: 500;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(20, 20, 40, 0.5);
         border-radius: 10px;
         padding: 0.5rem;
     }
     
-    .stRadio > div > label {
-        color: var(--text-primary);
-        padding: 0.75rem 1rem;
-        border-radius: 8px;
-        transition: all 0.2s ease;
-    }
-    
-    .stRadio > div > label:hover {
-        background: var(--surface-hover);
-    }
-    
-    .stRadio > div > label[data-baseweb="radio"] {
-        color: var(--text-primary);
-    }
-    
-    [data-baseweb="radio"] input:checked + label {
-        background: var(--gradient-primary);
-        color: white;
-        font-weight: 600;
-    }
-    
-    .stSelectbox > div > div {
-        background: var(--surface-light);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-    }
-    
-    .stTextInput > div > div > input {
-        background: var(--surface-light);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        color: var(--text-primary);
-    }
-    
-    .stSlider > div > div {
-        color: var(--primary);
-    }
-    
-    .stTabs [data-baseweb="tab-list"] {
-        background: var(--surface);
-        border-bottom: 1px solid var(--border);
-        gap: 0.5rem;
-    }
-    
     .stTabs [data-baseweb="tab"] {
-        color: var(--text-secondary);
-        padding: 0.75rem 1.5rem;
-        border-radius: 8px 8px 0 0;
-        transition: all 0.2s ease;
+        background: transparent;
+        color: #b0b0b0;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(229, 9, 20, 0.2);
+        color: #ffffff;
     }
     
     .stTabs [aria-selected="true"] {
-        background: var(--surface-light);
-        color: var(--text-primary);
-        border-bottom: 2px solid var(--primary);
+        background: linear-gradient(135deg, #e50914, #b20710);
+        color: white;
     }
     
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background: rgba(20, 20, 40, 0.6);
+        border-radius: 10px;
+        color: #ffffff;
+        font-weight: 600;
+    }
+    
+    .streamlit-expanderHeader:hover {
+        background: rgba(229, 9, 20, 0.2);
+    }
+    
+    /* Dataframe styling */
     .stDataFrame {
-        background: var(--surface-light);
+        background: rgba(20, 20, 40, 0.6);
         border-radius: 10px;
         overflow: hidden;
     }
     
-    .stExpander {
-        background: var(--surface-light);
-        border: 1px solid var(--border);
+    /* Radio buttons in sidebar */
+    .stRadio > div {
+        background: rgba(20, 20, 40, 0.4);
         border-radius: 10px;
-        margin: 1rem 0;
+        padding: 0.5rem;
     }
     
-    .stExpanderHeader {
-        color: var(--text-primary);
-        font-weight: 600;
-    }
-    
-    .stSuccess, .stInfo, .stWarning, .stError {
+    /* Select boxes */
+    .stSelectbox > div > div {
+        background: rgba(20, 20, 40, 0.8);
+        border: 1px solid rgba(229, 9, 20, 0.3);
         border-radius: 10px;
-        padding: 1rem 1.5rem;
-        border-left: 4px solid;
-        box-shadow: var(--shadow-sm);
     }
     
-    .stSuccess {
-        background: rgba(70, 211, 105, 0.1);
-        border-color: var(--accent-green);
-        color: var(--accent-green);
+    /* Slider */
+    .stSlider > div > div > div {
+        background: linear-gradient(90deg, #e50914, #b20710);
     }
     
-    .stInfo {
-        background: rgba(0, 212, 255, 0.1);
-        border-color: var(--accent);
-        color: var(--accent);
-    }
-    
-    .stWarning {
-        background: rgba(255, 193, 7, 0.1);
-        border-color: #FFC107;
-        color: #FFC107;
-    }
-    
-    .stError {
-        background: rgba(229, 9, 20, 0.1);
-        border-color: var(--primary);
-        color: var(--primary);
-    }
-    
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
+    /* Loading spinner custom */
     .stSpinner > div {
-        border-color: var(--primary) transparent transparent transparent;
+        border-top-color: #e50914 !important;
     }
     
-    hr {
-        border-color: var(--border);
-        margin: 2rem 0;
+    /* Glow effect for important elements */
+    .glow {
+        animation: glow 2s ease-in-out infinite alternate;
     }
     
-    code {
-        color: var(--accent);
-        background: rgba(0, 0, 0, 0.3);
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
+    @keyframes glow {
+        from {
+            box-shadow: 0 0 10px #e50914, 0 0 20px #e50914, 0 0 30px #e50914;
+        }
+        to {
+            box-shadow: 0 0 20px #e50914, 0 0 30px #b20710, 0 0 40px #b20710;
+        }
     }
     
-    ul, ol {
-        color: var(--text-secondary);
+    /* Feature highlights */
+    .feature-item {
+        background: linear-gradient(135deg, rgba(30, 30, 50, 0.8), rgba(20, 20, 40, 0.8));
+        border-radius: 12px;
+        padding: 1.2rem;
+        margin: 0.8rem 0;
+        border-left: 3px solid #e50914;
+        transition: all 0.3s ease;
     }
     
-    li {
-        margin: 0.5rem 0;
+    .feature-item:hover {
+        transform: translateX(10px);
+        border-left-width: 5px;
+        background: linear-gradient(135deg, rgba(229, 9, 20, 0.2), rgba(139, 0, 0, 0.2));
     }
     
-    strong {
-        color: var(--text-primary);
-        font-weight: 700;
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .main-header h1 {
+            font-size: 2rem;
+        }
+        
+        .main-header p {
+            font-size: 1rem;
+        }
+        
+        .movie-card {
+            padding: 1rem;
+        }
     }
-    </style>
-"""
-st.markdown(css_injection, unsafe_allow_html=True)
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize session state
 if 'models_loaded' not in st.session_state:
     st.session_state.models_loaded = False
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
-if 'non_pers_model' not in st.session_state:
-    st.session_state.non_pers_model = None
+if 'non_personalized_model' not in st.session_state:
+    st.session_state.non_personalized_model = None
 if 'content_model' not in st.session_state:
     st.session_state.content_model = None
 if 'movies_df' not in st.session_state:
     st.session_state.movies_df = None
+if 'ratings_df' not in st.session_state:
+    st.session_state.ratings_df = None
 if 'hidden_gems' not in st.session_state:
     st.session_state.hidden_gems = None
 
-@st.cache_data
-def load_data():
-    """Load data files - connects to notebook outputs"""
-    base_path = Path(__file__).parent
-    
-    try:
-        # Try to load from outputs (generated by notebook)
-        hidden_gems_path = base_path / 'outputs' / 'hidden_gems.csv'
-        if hidden_gems_path.exists():
-            hidden_gems = pd.read_csv(str(hidden_gems_path))
-        elif os.path.exists('outputs/hidden_gems.csv'):
-            hidden_gems = pd.read_csv('outputs/hidden_gems.csv')
-        else:
-            hidden_gems = pd.DataFrame()
-        
-        # Try to load movies data
-        movies_path = base_path / 'movies.csv'
-        if movies_path.exists():
-            movies_df = pd.read_csv(str(movies_path))
-        elif (base_path / 'data' / 'movies.csv').exists():
-            movies_df = pd.read_csv(str(base_path / 'data' / 'movies.csv'))
-        elif os.path.exists('data/movies.csv'):
-            movies_df = pd.read_csv('data/movies.csv')
-        elif os.path.exists('movies.csv'):
-            movies_df = pd.read_csv('movies.csv')
-        else:
-            movies_df = pd.DataFrame()
-        
-        return movies_df, hidden_gems
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-
 @st.cache_resource
 def load_models():
-    """Load trained models - connects to notebook saved models"""
+    """Load trained models from the models directory"""
     models = {}
-    base_path = Path(__file__).parent
+    models_dir = Path('models')
     
-    # Load non-personalized model
     try:
-        model_path = base_path / 'models' / 'non_personalized_model.pkl'
-        if model_path.exists():
-            models['non_personalized'] = joblib.load(str(model_path))
-            st.success("Non-personalized model loaded successfully")
-        else:
-            # Try relative path as fallback
-            if os.path.exists('models/non_personalized_model.pkl'):
-                models['non_personalized'] = joblib.load('models/non_personalized_model.pkl')
-                st.success("Non-personalized model loaded successfully")
-            else:
-                st.warning("Non-personalized model not found. Run the notebook first.")
-                st.info(f"Looking for: {model_path}")
+        # Load non-personalized model
+        if (models_dir / 'non_personalized_model.pkl').exists():
+            models['non_personalized'] = joblib.load(models_dir / 'non_personalized_model.pkl')
+        
+        # Load content-based model
+        if (models_dir / 'content_based_best_model.pkl').exists():
+            models['content_based'] = joblib.load(models_dir / 'content_based_best_model.pkl')
+        
+        return models
     except Exception as e:
-        st.error(f"Error loading non-personalized model: {e}")
+        st.error(f"Error loading models: {e}")
+        return {}
+
+@st.cache_data
+def load_data_files():
+    """Load datasets and outputs"""
+    data = {}
     
-    # Load content-based model
     try:
-        # Try best_model first
-        model_path = base_path / 'models' / 'content_based_best_model.pkl'
-        if model_path.exists():
-            models['content_based'] = joblib.load(str(model_path))
-            st.success("Content-based model loaded successfully")
-        elif (base_path / 'models' / 'content_based_random_forest.pkl').exists():
-            models['content_based'] = joblib.load(str(base_path / 'models' / 'content_based_random_forest.pkl'))
-            st.success("Content-based model loaded successfully")
-        else:
-            # Try relative paths as fallback
-            if os.path.exists('models/content_based_best_model.pkl'):
-                models['content_based'] = joblib.load('models/content_based_best_model.pkl')
-                st.success("Content-based model loaded successfully")
-            elif os.path.exists('models/content_based_random_forest.pkl'):
-                models['content_based'] = joblib.load('models/content_based_random_forest.pkl')
-                st.success("Content-based model loaded successfully")
-            else:
-                st.warning("Content-based model not found. Run the notebook first.")
-                st.info(f"Looking for: {base_path / 'models' / 'content_based_best_model.pkl'}")
+        # Load movies data
+        if os.path.exists('movies.csv'):
+            data['movies'] = pd.read_csv('movies.csv')
+            # Parse genres
+            if 'genres' in data['movies'].columns:
+                data['movies']['genres_list'] = data['movies']['genres'].str.split('|')
+                data['movies']['genre_count'] = data['movies']['genres_list'].apply(len)
+            # Extract year from title
+            data['movies']['release_year'] = data['movies']['title'].str.extract(r'\((\d{4})\)').astype(float)
+        
+        # Load ratings data (sample for performance)
+        if os.path.exists('ratings.csv'):
+            # Load a sample for faster processing
+            data['ratings'] = pd.read_csv('ratings.csv', nrows=100000)
+        
+        # Load hidden gems
+        if os.path.exists('outputs/hidden_gems.csv'):
+            data['hidden_gems'] = pd.read_csv('outputs/hidden_gems.csv')
+        
+        return data
     except Exception as e:
-        st.error(f"Error loading content-based model: {e}")
-    
-    return models
+        st.error(f"Error loading data: {e}")
+        return {}
+
+def load_models_action():
+    """Load models when button is clicked"""
+    with st.spinner('🎬 Loading ML models...'):
+        models = load_models()
+        
+        if models:
+            if 'non_personalized' in models:
+                st.session_state.non_personalized_model = models['non_personalized']
+            if 'content_based' in models:
+                st.session_state.content_model = models['content_based']
+            st.session_state.models_loaded = True
+            st.success('✅ Models loaded successfully!')
+        else:
+            st.error('⚠️ No models found. Run the notebook first!')
+
+def load_data_action():
+    """Load data when button is clicked"""
+    with st.spinner('📊 Loading datasets...'):
+        data = load_data_files()
+        
+        if data:
+            if 'movies' in data:
+                st.session_state.movies_df = data['movies']
+            if 'ratings' in data:
+                st.session_state.ratings_df = data['ratings']
+            if 'hidden_gems' in data:
+                st.session_state.hidden_gems = data['hidden_gems']
+            st.session_state.data_loaded = True
+            st.success('✅ Data loaded successfully!')
+        else:
+            st.error('⚠️ No data files found. Check your directory!')
 
 def main():
     """Main application"""
     
-    # Header with icons
+    # Header
     st.markdown("""
-        <div class="app-header">
-            <h1><i class="fas fa-film icon-inline"></i>MovieLens Recommender</h1>
+        <div class="main-header">
+            <h1>🎬 MovieLens Recommender</h1>
             <p>Intelligent Movie Recommendations Powered by Machine Learning</p>
         </div>
     """, unsafe_allow_html=True)
     
     # Sidebar navigation
     with st.sidebar:
-        st.markdown("### <i class='fas fa-compass icon-inline'></i>Navigation")
+        st.markdown("## 🎯 Navigation")
+        
         page = st.radio(
-            "Select a page:",
-            ["Home", "Get Recommendations", "Find Similar Movies", 
-             "Business Insights", "Model Performance"],
+            "",
+            ["🏠 Home", "🎯 Get Recommendations", "🔍 Find Similar Movies", 
+             "📊 Business Insights", "📈 Model Performance"],
             label_visibility="collapsed"
         )
         
         st.markdown("---")
         
-        st.markdown("### <i class='fas fa-info-circle icon-inline'></i>About")
+        st.markdown("## ℹ️ About")
         st.markdown("""
-        This application demonstrates an end-to-end recommendation system 
-        built using the MovieLens dataset.
+        <div style='font-size: 0.9rem; color: #b0b0b0;'>
+        This application demonstrates an end-to-end recommendation system built using the MovieLens dataset.
         
-        **Features:**
-        - Non-personalized recommendations
-        - Content-based filtering
-        - Similar movie discovery
-        - Business intelligence insights
-        """)
-        
-        st.markdown("---")
-        
-        # Load models button
-        if st.button("Load Models", use_container_width=True):
-            with st.spinner("Loading models..."):
-                base_path = Path(__file__).parent
-                st.info(f"Working directory: {base_path}")
-                
-                models_dir = base_path / 'models'
-                if models_dir.exists():
-                    model_files = list(models_dir.glob('*.pkl'))
-                    if model_files:
-                        st.info(f"Found {len(model_files)} model file(s): {[f.name for f in model_files]}")
-                    else:
-                        st.warning(f"models/ directory exists but no .pkl files found")
-                else:
-                    st.warning(f"models/ directory not found at {models_dir}")
-                
-                models = load_models()
-                if models:
-                    st.session_state.non_pers_model = models.get('non_personalized')
-                    st.session_state.content_model = models.get('content_based')
-                    st.session_state.models_loaded = True
-                    if st.session_state.non_pers_model and st.session_state.content_model:
-                        st.success("All models loaded successfully!")
-                    elif st.session_state.non_pers_model or st.session_state.content_model:
-                        st.warning("Some models loaded, but not all")
-        
-        # Load data button
-        if st.button("Load Data", use_container_width=True):
-            with st.spinner("Loading data..."):
-                movies_df, hidden_gems = load_data()
-                st.session_state.movies_df = movies_df
-                st.session_state.hidden_gems = hidden_gems
-                st.session_state.data_loaded = True
-                st.success("Data loaded successfully!")
+        <strong>Features:</strong>
+        • Non-personalized recommendations<br>
+        • Content-based filtering<br>
+        • Similar movie discovery<br>
+        • Business intelligence insights
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
-        st.markdown("**Built with** Streamlit • Python • ML")
+        
+        # Load buttons with enhanced styling
+        if st.button("🤖 LOAD MODELS", use_container_width=True):
+            load_models_action()
+        
+        if st.button("📁 LOAD DATA", use_container_width=True):
+            load_data_action()
+        
+        st.markdown("---")
+        st.markdown("""
+        <div style='text-align: center; color: #666; font-size: 0.8rem;'>
+        Built with Streamlit • Python • ML
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Route to pages
-    if page == "Home":
+    # Route to appropriate page
+    if page == "🏠 Home":
         show_home_page()
-    elif page == "Get Recommendations":
+    elif page == "🎯 Get Recommendations":
         show_recommendations_page()
-    elif page == "Find Similar Movies":
+    elif page == "🔍 Find Similar Movies":
         show_similar_movies_page()
-    elif page == "Business Insights":
+    elif page == "📊 Business Insights":
         show_insights_page()
-    elif page == "Model Performance":
+    elif page == "📈 Model Performance":
         show_model_performance_page()
 
 def show_home_page():
-    """Home page with overview and setup instructions"""
+    """Home page with overview"""
     
-    st.markdown("## <i class='fas fa-home icon-inline'></i>Welcome to the MovieLens Recommendation System")
+    st.markdown("## 👋 Welcome to the MovieLens Recommendation System")
     
+    # Connection info
     st.markdown("""
     <div class="info-box">
-        <strong><i class="fas fa-link icon-inline"></i>Connection to Notebook:</strong> This app uses models and data generated by running 
-        the <code>Team_9_Final_Project.ipynb</code> notebook. Make sure you've run the notebook 
-        and saved the models before using this app.
+        <strong>🔗 Connection to Notebook:</strong><br>
+        This app uses models and data generated by running the <code>Team_9_Final_Project.ipynb</code> notebook. 
+        Make sure you've run the notebook and saved the models before using this app.
     </div>
     """, unsafe_allow_html=True)
     
-    # Check if models/data are loaded
+    # Status indicators
     col1, col2 = st.columns(2)
     
     with col1:
         if st.session_state.models_loaded:
-            st.success("Models Loaded")
+            st.markdown("""
+            <div class="success-box">
+                ✅ Models Loaded - Ready for recommendations
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.warning("Models Not Loaded - Click 'Load Models' in sidebar")
+            st.markdown("""
+            <div class="warning-box">
+                ⚠️ Models Not Loaded - Click 'Load Models' in sidebar
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         if st.session_state.data_loaded:
-            st.success("Data Loaded")
+            st.markdown("""
+            <div class="success-box">
+                ✅ Data Loaded - Explore insights available
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.warning("Data Not Loaded - Click 'Load Data' in sidebar")
+            st.markdown("""
+            <div class="warning-box">
+                ⚠️ Data Not Loaded - Click 'Load Data' in sidebar
+            </div>
+            """, unsafe_allow_html=True)
     
-    # Quick stats
     st.markdown("---")
-    st.markdown("## <i class='fas fa-chart-line icon-inline'></i>Platform Overview")
+    
+    # Platform Overview
+    st.markdown("## 📊 Platform Overview")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Ratings", "2M+", "Analyzed")
+        st.markdown("""
+        <div class="platform-metric">
+            <div class="platform-metric-label">Ratings</div>
+            <div class="platform-metric-value">2M+</div>
+            <div class="platform-metric-status">↑ Analyzed</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.metric("Movies", "86K+", "In Catalog")
+        st.markdown("""
+        <div class="platform-metric">
+            <div class="platform-metric-label">Movies</div>
+            <div class="platform-metric-value">86K+</div>
+            <div class="platform-metric-status">↑ In Catalog</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col3:
-        st.metric("Users", "Thousands", "Active")
+        st.markdown("""
+        <div class="platform-metric">
+            <div class="platform-metric-label">Users</div>
+            <div class="platform-metric-value">Thousands</div>
+            <div class="platform-metric-status">↑ Active</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col4:
-        st.metric("ML Models", "3", "Trained")
+        st.markdown("""
+        <div class="platform-metric">
+            <div class="platform-metric-label">ML Models</div>
+            <div class="platform-metric-value">3</div>
+            <div class="platform-metric-status">↑ Trained</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Features overview
-    st.markdown("## <i class='fas fa-rocket icon-inline'></i>Key Features")
+    # Key Features
+    st.markdown("## 🚀 Key Features")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-        ### <i class='fas fa-bullseye icon-inline'></i>Personalized Recommendations
-        Get top movie recommendations based on popularity, ratings, and content similarity.
+        <div class="feature-item">
+            <h4>🎯 Personalized Recommendations</h4>
+            <p>Get top movie recommendations based on popularity, ratings, and content similarity.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        ### <i class='fas fa-search icon-inline'></i>Similar Movie Discovery
-        Find movies similar to your favorites using advanced content-based filtering.
-        """)
+        st.markdown("""
+        <div class="feature-item">
+            <h4>🔍 Similar Movie Discovery</h4>
+            <p>Find movies similar to your favorites using advanced content-based filtering.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("""
-        ### <i class='fas fa-chart-bar icon-inline'></i>Business Intelligence
-        Explore comprehensive analytics on user behavior, genre performance, and trends.
+        <div class="feature-item">
+            <h4>📊 Business Intelligence</h4>
+            <p>Explore comprehensive analytics on user behavior, genre performance, and trends.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        ### <i class='fas fa-chart-area icon-inline'></i>Model Comparison
-        Compare different machine learning models and their performance metrics.
-        """)
+        st.markdown("""
+        <div class="feature-item">
+            <h4>📈 Model Comparison</h4>
+            <p>Compare different machine learning models and their performance metrics.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Getting started
-    st.markdown("## <i class='fas fa-clipboard-list icon-inline'></i>Getting Started")
-    
-    with st.expander("1. Run the Notebook First", expanded=True):
+    # Getting Started
+    with st.expander("📋 Getting Started", expanded=False):
         st.markdown("""
+        ### Run the Notebook First
+        
         **Important:** This app requires models and data from the notebook.
         
         1. Open `Team_9_Final_Project.ipynb`
-        2. Run all cells to completion
-        3. This will create:
+        2. Run all cells from top to bottom
+        3. This creates:
            - `models/non_personalized_model.pkl`
            - `models/content_based_best_model.pkl`
            - `outputs/hidden_gems.csv`
            - `outputs/executive_summary.json`
-        """)
-    
-    with st.expander("2. Load Models & Data"):
-        st.markdown("""
+        
+        ### Load Models & Data
+        
         Once the notebook has run:
         
-        1. Click **"Load Models"** in the sidebar
-        2. Click **"Load Data"** in the sidebar
+        1. Click "🤖 Load Models" in the sidebar
+        2. Click "📁 Load Data" in the sidebar
         3. Navigate to different pages to explore features
         """)
     
-    with st.expander("3. Explore Features"):
+    with st.expander("🎨 Explore Features", expanded=False):
         st.markdown("""
         - **Get Recommendations**: Top-N movies with genre filtering
         - **Find Similar Movies**: Content-based movie discovery
@@ -987,145 +994,188 @@ def show_home_page():
 def show_recommendations_page():
     """Recommendations page"""
     
-    st.markdown("## <i class='fas fa-bullseye icon-inline'></i>Get Movie Recommendations")
+    st.markdown("## 🎯 Get Movie Recommendations")
     
-    if not st.session_state.models_loaded or st.session_state.non_pers_model is None:
-        st.warning("Please load models first using the sidebar button.")
+    if not st.session_state.models_loaded:
+        st.warning("⚠️ Please load models first using the sidebar button.")
+        return
+    
+    if st.session_state.non_personalized_model is None:
+        st.error("❌ Non-personalized model not available.")
         return
     
     st.markdown("""
     <div class="info-box">
-        Get top movie recommendations based on our non-personalized IMDB weighted score algorithm.
+        Get top movie recommendations based on IMDB-weighted popularity scores.
+        Filter by genre to find movies in categories you love! 🎬
     </div>
     """, unsafe_allow_html=True)
     
-    # Filters
+    # Controls
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        num_recommendations = st.slider("Number of recommendations", 5, 50, 10)
-    
-    with col2:
         genre_filter = st.selectbox(
-            "Filter by genre (optional)",
-            ["All Genres", "Action", "Comedy", "Drama", "Thriller", "Romance", 
-             "Sci-Fi", "Horror", "Animation", "Documentary"]
+            "🎭 Filter by Genre (optional)",
+            ['All Genres', 'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 
+             'Documentary', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance', 
+             'Sci-Fi', 'Thriller', 'War', 'Western']
         )
     
-    if st.button("Get Recommendations", type="primary"):
-        with st.spinner("Generating recommendations..."):
+    with col2:
+        num_recommendations = st.slider("📊 Number of recommendations", 5, 50, 10)
+    
+    if st.button("✨ Get Recommendations", use_container_width=True):
+        with st.spinner('🎬 Finding the best movies for you...'):
             try:
-                # Get recommendations
-                genre = None if genre_filter == "All Genres" else genre_filter
-                recommendations = st.session_state.non_pers_model.recommend(n=num_recommendations, genre=genre)
+                genre = None if genre_filter == 'All Genres' else genre_filter
+                recommendations = st.session_state.non_personalized_model.recommend(
+                    n=num_recommendations, 
+                    genre=genre
+                )
                 
-                st.success(f"Found {len(recommendations)} recommendations!")
+                st.markdown(f"### 🌟 Top {len(recommendations)} Movie Recommendations")
+                
+                if genre:
+                    st.info(f"🎭 Filtered by genre: **{genre}**")
                 
                 # Display recommendations
-                st.markdown("### Top Recommendations")
-                
                 for idx, row in recommendations.iterrows():
                     st.markdown(f"""
                         <div class="movie-card">
-                            <div class="movie-title"><i class="fas fa-film icon-inline"></i>{idx+1}. {row['title']}</div>
-                            <div class="movie-genre"><i class="fas fa-tags icon-inline"></i>{row['genres']}</div>
-                            <div class="movie-rating"><i class="fas fa-star icon-inline"></i>{row['avg_rating']:.2f}/5.0 • {int(row['num_ratings']):,} ratings</div>
-                            <div style="color: #8b5cf6; font-size: 0.9rem; margin-top: 0.5rem;"><i class="fas fa-chart-line icon-inline"></i>Score: {row['weighted_score']:.3f}</div>
+                            <div class="movie-title">#{idx+1}. {row['title']}</div>
+                            <div class="movie-genre">🎭 {row['genres']}</div>
+                            <div class="movie-rating">⭐ Rating: {row['avg_rating']:.2f}/5.0</div>
+                            <div style="color: #8b5cf6; font-size: 0.9rem; margin-top: 0.5rem;">
+                                👥 {row['num_ratings']} ratings • 📊 Score: {row['weighted_score']:.3f}
+                            </div>
                         </div>
                     """, unsafe_allow_html=True)
+                
+                st.success(f"✅ Found {len(recommendations)} amazing movies for you!")
+                
             except Exception as e:
-                st.error(f"Error generating recommendations: {e}")
-                st.info("Make sure the model was trained correctly in the notebook.")
+                st.error(f"❌ Error getting recommendations: {e}")
 
 def show_similar_movies_page():
-    """Similar movies finder page"""
+    """Similar movies page"""
     
-    st.markdown("## <i class='fas fa-search icon-inline'></i>Find Similar Movies")
+    st.markdown("## 🔍 Find Similar Movies")
     
-    if not st.session_state.models_loaded or st.session_state.content_model is None:
-        st.warning("Please load models first using the sidebar button.")
+    if not st.session_state.models_loaded:
+        st.warning("⚠️ Please load models first using the sidebar button.")
         return
     
-    if st.session_state.movies_df is None or st.session_state.movies_df.empty:
-        st.warning("Please load data first using the sidebar button.")
+    if not st.session_state.data_loaded:
+        st.warning("⚠️ Please load data first using the sidebar button.")
+        return
+    
+    if st.session_state.content_model is None:
+        st.error("❌ Content-based model not available.")
         return
     
     st.markdown("""
     <div class="info-box">
-        Search for a movie and discover similar titles based on content features.
+        Search for a movie and discover similar titles based on content features like genres, 
+        release year, and ratings patterns. Perfect for finding your next favorite! 🎬
     </div>
     """, unsafe_allow_html=True)
     
-    # Search box
-    movie_search = st.text_input("Search for a movie:", placeholder="e.g., Toy Story, Matrix, Inception")
-    
-    col1, col2 = st.columns([1, 1])
+    # Search input
+    col1, col2 = st.columns([3, 1])
     
     with col1:
-        num_similar = st.slider("Number of similar movies", 5, 20, 10)
+        search_query = st.text_input("🔎 Search for a movie", placeholder="e.g., Toy Story, Inception, The Matrix...")
     
     with col2:
-        st.info("Using Random Forest model for similarity")
+        num_similar = st.slider("📊 Number of similar movies", 5, 20, 10)
     
-    if st.button("Find Similar Movies", type="primary") and movie_search:
-        with st.spinner("Searching for similar movies..."):
-            try:
-                # Search for movie
-                search_results = st.session_state.movies_df[
-                    st.session_state.movies_df['title'].str.contains(movie_search, case=False, na=False)
-                ]
+    if search_query:
+        with st.spinner('🔍 Searching for movies...'):
+            # Search for movies matching the query
+            matching_movies = st.session_state.movies_df[
+                st.session_state.movies_df['title'].str.contains(search_query, case=False, na=False)
+            ]
+            
+            if len(matching_movies) == 0:
+                st.warning(f"⚠️ No movies found matching '{search_query}'")
+            elif len(matching_movies) == 1:
+                movie_id = matching_movies.iloc[0]['movieId']
+                movie_title = matching_movies.iloc[0]['title']
                 
-                if len(search_results) == 0:
-                    st.error(f"No movies found matching '{movie_search}'")
-                    return
+                try:
+                    st.success(f"✅ Finding movies similar to: **{movie_title}**")
+                    
+                    # Find similar movies
+                    similar_movies = st.session_state.content_model.find_similar_movies(movie_id, n=num_similar)
+                    
+                    st.markdown(f"### 🎬 Movies Similar to: {movie_title}")
+                    
+                    for idx, row in similar_movies.iterrows():
+                        st.markdown(f"""
+                            <div class="movie-card">
+                                <div class="movie-title">#{idx+1}. {row['title']}</div>
+                                <div class="movie-genre">🎭 {row['genres']}</div>
+                                <div style="color: #8b5cf6; font-size: 0.9rem; margin-top: 0.5rem;">
+                                    📅 Year: {row.get('release_year', 'N/A')}
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"❌ Error finding similar movies: {e}")
+            else:
+                st.info(f"🎯 Found {len(matching_movies)} movies. Please select one:")
                 
-                # Show search results
-                if len(search_results) > 1:
-                    selected_title = st.selectbox(
-                        "Multiple matches found. Select one:",
-                        search_results['title'].tolist()
-                    )
-                    selected_movie = search_results[search_results['title'] == selected_title].iloc[0]
-                else:
-                    selected_movie = search_results.iloc[0]
-                
-                movie_id = selected_movie['movieId']
-                movie_title = selected_movie['title']
-                
-                st.success(f"Finding movies similar to: **{movie_title}**")
-                
-                # Find similar movies
-                similar_movies = st.session_state.content_model.find_similar_movies(movie_id, n=num_similar)
-                
-                st.markdown(f"### Movies Similar to: {movie_title}")
-                
-                for idx, row in similar_movies.iterrows():
-                    st.markdown(f"""
-                        <div class="movie-card">
-                            <div class="movie-title"><i class="fas fa-film icon-inline"></i>{idx+1}. {row['title']}</div>
-                            <div class="movie-genre"><i class="fas fa-tags icon-inline"></i>{row['genres']}</div>
-                            <div style="color: #8b5cf6; font-size: 0.9rem; margin-top: 0.5rem;"><i class="fas fa-calendar icon-inline"></i>Year: {row.get('release_year', 'N/A')}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Error finding similar movies: {e}")
-                st.info("Make sure the content-based model was trained correctly in the notebook.")
+                # Display matching movies for selection
+                for idx, row in matching_movies.head(10).iterrows():
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.markdown(f"""
+                            <div class="movie-card">
+                                <div class="movie-title">{row['title']}</div>
+                                <div class="movie-genre">🎭 {row['genres']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with col2:
+                        if st.button(f"Select", key=f"select_{row['movieId']}"):
+                            try:
+                                movie_title = row['title']
+                                st.success(f"✅ Finding movies similar to: **{movie_title}**")
+                                
+                                similar_movies = st.session_state.content_model.find_similar_movies(
+                                    row['movieId'], n=num_similar
+                                )
+                                
+                                st.markdown(f"### 🎬 Movies Similar to: {movie_title}")
+                                
+                                for idx2, row2 in similar_movies.iterrows():
+                                    st.markdown(f"""
+                                        <div class="movie-card">
+                                            <div class="movie-title">#{idx2+1}. {row2['title']}</div>
+                                            <div class="movie-genre">🎭 {row2['genres']}</div>
+                                            <div style="color: #8b5cf6; font-size: 0.9rem; margin-top: 0.5rem;">
+                                                📅 Year: {row2.get('release_year', 'N/A')}
+                                            </div>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"❌ Error finding similar movies: {e}")
 
 def show_insights_page():
     """Business insights page"""
     
-    st.markdown("## <i class='fas fa-chart-bar icon-inline'></i>Business Intelligence Dashboard")
+    st.markdown("## 📊 Business Intelligence Dashboard")
     
     if not st.session_state.data_loaded:
-        st.warning("Please load data first using the sidebar button.")
-        st.info("The notebook generates comprehensive insights. This page shows key metrics.")
+        st.warning("⚠️ Please load data first using the sidebar button.")
+        st.info("💡 The notebook generates comprehensive insights. This page shows key metrics.")
         return
     
     # Tabs for different insights
-    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "User Behavior", "Content Performance", "Hidden Gems"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Overview", "👥 User Behavior", "🎬 Content Performance", "💎 Hidden Gems"])
     
     with tab1:
-        st.markdown("### Executive Summary")
+        st.markdown("### 📊 Executive Summary")
         
         # Try to load executive summary
         try:
@@ -1137,57 +1187,57 @@ def show_insights_page():
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    st.metric("Total Ratings", summary.get('total_ratings', 'N/A'))
+                    st.metric("📊 Total Ratings", summary.get('total_ratings', 'N/A'))
                 with col2:
-                    st.metric("Active Users", summary.get('unique_users', 'N/A'))
+                    st.metric("👥 Active Users", summary.get('unique_users', 'N/A'))
                 with col3:
-                    st.metric("Platform Rating", summary.get('avg_rating', 'N/A'))
+                    st.metric("⭐ Platform Rating", summary.get('avg_rating', 'N/A'))
                 with col4:
-                    st.metric("Best Model", summary.get('best_model', 'N/A'))
+                    st.metric("🏆 Best Model", summary.get('best_model', 'N/A'))
                 
                 st.markdown("---")
                 st.markdown("""
                 <div class="info-box">
-                    <strong>Key Insights:</strong>
+                    <strong>🔑 Key Insights:</strong>
                     <ul>
-                        <li>User engagement metrics from comprehensive analysis</li>
-                        <li>Genre performance data available in notebook</li>
-                        <li>Temporal trends analyzed in detail</li>
-                        <li>Power users identified for targeted strategies</li>
+                        <li>📊 User engagement metrics from comprehensive analysis</li>
+                        <li>🎭 Genre performance data available in notebook</li>
+                        <li>📈 Temporal trends analyzed in detail</li>
+                        <li>⭐ Power users identified for targeted strategies</li>
                     </ul>
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                st.info("Run the notebook to generate executive summary. Check outputs/executive_summary.json")
+                st.info("💡 Run the notebook to generate executive summary. Check outputs/executive_summary.json")
         except Exception as e:
-            st.warning(f"Could not load executive summary: {e}")
+            st.warning(f"⚠️ Could not load executive summary: {e}")
     
     with tab2:
-        st.markdown("### User Segmentation")
+        st.markdown("### 👥 User Segmentation")
         st.markdown("Analysis of user behavior patterns and engagement levels.")
-        st.info("Detailed user segmentation analysis is available in the notebook (Part 4).")
+        st.info("📊 Detailed user segmentation analysis is available in the notebook (Part 4).")
         st.markdown("""
-        **Key Segments Identified:**
-        - Power Users (100+ ratings)
-        - Active Users (20-100 ratings)
-        - Casual Users (<20 ratings)
-        - Generous vs Critical Raters
+        **🎯 Key Segments Identified:**
+        - ⭐ Power Users (100+ ratings)
+        - 🎬 Active Users (20-100 ratings)
+        - 👤 Casual Users (<20 ratings)
+        - 😊 Generous vs 😐 Critical Raters
         """)
     
     with tab3:
-        st.markdown("### Genre Performance")
+        st.markdown("### 🎬 Genre Performance")
         st.markdown("Comprehensive analysis of genre ratings and popularity.")
-        st.info("Detailed genre performance analysis with engagement scores is available in the notebook (Part 4).")
+        st.info("📊 Detailed genre performance analysis with engagement scores is available in the notebook (Part 4).")
         st.markdown("""
-        **Analysis Includes:**
-        - Average rating by genre
-        - Total ratings per genre
-        - Engagement scores
-        - Risk vs reward assessment
+        **📈 Analysis Includes:**
+        - ⭐ Average rating by genre
+        - 📊 Total ratings per genre
+        - 🎯 Engagement scores
+        - ⚖️ Risk vs reward assessment
         """)
     
     with tab4:
-        st.markdown("### Hidden Gems Discovery")
+        st.markdown("### 💎 Hidden Gems Discovery")
         st.markdown("High-rated movies with low visibility - perfect for recommendations.")
         
         if st.session_state.hidden_gems is not None and not st.session_state.hidden_gems.empty:
@@ -1196,16 +1246,16 @@ def show_insights_page():
                 use_container_width=True
             )
         else:
-            st.info("Run the notebook to generate hidden gems data. Check outputs/hidden_gems.csv")
+            st.info("💡 Run the notebook to generate hidden gems data. Check outputs/hidden_gems.csv")
 
 def show_model_performance_page():
     """Model performance comparison page"""
     
-    st.markdown("## <i class='fas fa-chart-area icon-inline'></i>Model Performance Comparison")
+    st.markdown("## 📈 Model Performance Comparison")
     
     st.markdown("""
     <div class="info-box">
-        Comparison of different content-based recommendation models trained in the notebook.
+        🎯 Comparison of different content-based recommendation models trained in the notebook.
     </div>
     """, unsafe_allow_html=True)
     
@@ -1214,70 +1264,70 @@ def show_model_performance_page():
         if os.path.exists('outputs/model_comparison.csv'):
             comparison_df = pd.read_csv('outputs/model_comparison.csv')
             
-            st.markdown("### Performance Metrics")
+            st.markdown("### 📊 Performance Metrics")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 best_model = comparison_df.loc[comparison_df['RMSE'].idxmin()]
-                st.markdown("#### <i class='fas fa-trophy icon-inline'></i>Best Model: " + best_model['Model'])
+                st.markdown("#### 🏆 Best Model: " + best_model['Model'])
                 st.metric("RMSE", f"{best_model['RMSE']:.4f}", "Lower is better")
                 st.metric("MAE", f"{best_model['MAE']:.4f}", "Lower is better")
                 st.metric("Accuracy", f"{best_model['Accuracy']:.2%}", "Higher is better")
-                st.success("Recommended for Production")
+                st.success("✅ Recommended for Production")
             
             with col2:
                 if len(comparison_df) > 1:
                     second = comparison_df.nsmallest(2, 'RMSE').iloc[1]
-                    st.markdown("#### " + second['Model'])
+                    st.markdown("#### 🥈 " + second['Model'])
                     st.metric("RMSE", f"{second['RMSE']:.4f}")
                     st.metric("MAE", f"{second['MAE']:.4f}")
                     st.metric("Accuracy", f"{second['Accuracy']:.2%}")
-                    st.info("Fast Training")
+                    st.info("⚡ Fast Training")
             
             with col3:
                 if len(comparison_df) > 2:
                     third = comparison_df.nlargest(1, 'RMSE').iloc[0]
-                    st.markdown("#### " + third['Model'])
+                    st.markdown("#### 🥉 " + third['Model'])
                     st.metric("RMSE", f"{third['RMSE']:.4f}")
                     st.metric("MAE", f"{third['MAE']:.4f}")
                     st.metric("Accuracy", f"{third['Accuracy']:.2%}")
-                    st.warning("Baseline Model")
+                    st.warning("📊 Baseline Model")
             
             st.markdown("---")
-            st.markdown("### Detailed Comparison")
+            st.markdown("### 📋 Detailed Comparison")
             st.dataframe(comparison_df, use_container_width=True)
             
             st.markdown("---")
-            st.markdown("### Model Recommendations")
+            st.markdown("### 💡 Model Recommendations")
             st.markdown("""
             **Based on comprehensive evaluation:**
             
-            1. **Random Forest** - Best for production deployment
-               - Highest accuracy and lowest error rates
-               - Good balance between performance and training time
-               - Robust to overfitting with proper tuning
+            1. **🌲 Random Forest** - Best for production deployment
+               - ✅ Highest accuracy and lowest error rates
+               - ⚖️ Good balance between performance and training time
+               - 🛡️ Robust to overfitting with proper tuning
             
-            2. **Ridge Regression** - Best for rapid iteration
-               - Fastest training time
-               - Acceptable performance for most use cases
-               - Easy to interpret and maintain
+            2. **📈 Ridge Regression** - Best for rapid iteration
+               - ⚡ Fastest training time
+               - ✅ Acceptable performance for most use cases
+               - 📊 Easy to interpret and maintain
             
-            3. **KNN** - Baseline comparison
-               - Simple implementation
-               - Useful for similarity-based recommendations
-               - Can be slow with large datasets
+            3. **🔍 KNN** - Baseline comparison
+               - ✨ Simple implementation
+               - 🎯 Useful for similarity-based recommendations
+               - ⏱️ Can be slow with large datasets
             """)
         else:
-            st.info("Run the notebook to generate model comparison. Check outputs/model_comparison.csv")
+            st.info("💡 Run the notebook to generate model comparison. Check outputs/model_comparison.csv")
             st.markdown("""
-            **Expected Models:**
-            - Random Forest (Best Performance)
-            - Ridge Regression (Fast Training)
-            - K-Nearest Neighbors (Baseline)
+            **📊 Expected Models:**
+            - 🌲 Random Forest (Best Performance)
+            - 📈 Ridge Regression (Fast Training)
+            - 🔍 K-Nearest Neighbors (Baseline)
             """)
     except Exception as e:
-        st.error(f"Error loading model comparison: {e}")
+        st.error(f"❌ Error loading model comparison: {e}")
 
 if __name__ == "__main__":
     main()
