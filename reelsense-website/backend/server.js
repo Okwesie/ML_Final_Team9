@@ -17,7 +17,8 @@ function callPythonScript(action, args = []) {
       pythonPath: process.platform === 'win32' ? 'python' : 'python3',
       pythonOptions: ['-u'],
       scriptPath: __dirname,
-      args: [action, ...args]
+      args: [action, ...args],
+      env: process.env
     };
 
     PythonShell.run('predict.py', options, (err, results) => {
@@ -49,14 +50,18 @@ app.get('/api/recommendations', async (req, res) => {
     const n = req.query.n || 10;
     const genre = req.query.genre || null;
     
+    console.log(`[API] Getting recommendations: n=${n}, genre=${genre}`);
     const result = await callPythonScript('recommend', [n, genre || 'null']);
     
     if (result.error) {
+      console.error('[API] Error:', result.error);
       return res.status(500).json(result);
     }
     
+    console.log(`[API] Success: Returning ${result.data?.length || 0} recommendations`);
     res.json(result);
   } catch (error) {
+    console.error('[API] Exception:', error);
     res.status(500).json({ error: error.message });
   }
 });

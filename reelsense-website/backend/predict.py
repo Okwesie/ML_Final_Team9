@@ -47,26 +47,32 @@ ratings_df = None
 def load_models():
     global models, movies_df, ratings_df
     
-    if models:
+    if models and movies_df is not None:
         return
     
     models_dir = Path(__file__).parent.parent.parent / 'models'
     data_dir = Path(__file__).parent.parent.parent
     
     movies_path = data_dir / 'movies.csv'
-    if movies_path.exists():
-        movies_df = pd.read_csv(movies_path)
-        movies_df['genres_list'] = movies_df['genres'].str.split('|')
-        movies_df['genre_count'] = movies_df['genres_list'].apply(len)
-        movies_df['release_year'] = movies_df['title'].str.extract(r'\((\d{4})\)').astype(float)
+    if not movies_path.exists():
+        raise FileNotFoundError(f'Movies file not found at {movies_path}')
+    
+    movies_df = pd.read_csv(movies_path)
+    movies_df['genres_list'] = movies_df['genres'].str.split('|')
+    movies_df['genre_count'] = movies_df['genres_list'].apply(len)
+    movies_df['release_year'] = movies_df['title'].str.extract(r'\((\d{4})\)').astype(float)
     
     ratings_path = data_dir / 'ratings.csv'
-    if ratings_path.exists():
-        ratings_df = pd.read_csv(ratings_path, nrows=100000)
+    if not ratings_path.exists():
+        raise FileNotFoundError(f'Ratings file not found at {ratings_path}')
+    
+    ratings_df = pd.read_csv(ratings_path, nrows=100000)
     
     non_pers_path = models_dir / 'non_personalized_model.pkl'
-    if non_pers_path.exists():
-        models['non_personalized'] = joblib.load(non_pers_path)
+    if not non_pers_path.exists():
+        raise FileNotFoundError(f'Model file not found at {non_pers_path}')
+    
+    models['non_personalized'] = joblib.load(non_pers_path)
     
     content_path = models_dir / 'content_based_best_model.pkl'
     if content_path.exists():
@@ -76,16 +82,22 @@ def load_models():
             pass
 
 def handle_recommendations(n=10, genre=None):
-    load_models()
-    
-    if 'non_personalized' not in models:
-        return {'error': 'Model not found'}
-    
     try:
+        load_models()
+        
+        if 'non_personalized' not in models:
+            return {'error': 'Model not loaded'}
+        
+        if movies_df is None:
+            return {'error': 'Movies data not loaded'}
+        
         recommendations = models['non_personalized'].recommend(n=int(n), genre=genre)
         result = recommendations.to_dict('records')
         return {'success': True, 'data': result}
     except Exception as e:
+        import traceback
+        error_msg = f'{str(e)}\n{traceback.format_exc()}'
+        print(json.dumps({'error': error_msg}), file=sys.stderr)
         return {'error': str(e)}
 
 def handle_search(query):
