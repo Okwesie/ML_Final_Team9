@@ -13,6 +13,17 @@ tags.csv
 movies.csv
 links.csv
 
+# Node.js
+node_modules/
+package-lock.json
+.env
+
+# ReelSense website
+reelsense-website/frontend/node_modules/
+reelsense-website/backend/node_modules/
+reelsense-website/frontend/dist/
+reelsense-website/backend/dist/
+
 # Python cache
 __pycache__/
 *.py[cod]
