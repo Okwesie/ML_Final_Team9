@@ -4,7 +4,7 @@
 *.pickle
 
 # Models directory
-models/
+
 
 # Data files
 genome-scores.csv
