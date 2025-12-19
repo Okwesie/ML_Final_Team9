@@ -5,15 +5,47 @@ Main entry point for ML inference API
 import os
 import time
 import logging
+from datetime import datetime
 from typing import List, Optional
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import pandas as pd
+#from dotenv import load_dotenv
 
+import pandas as pd
 from model_service import ModelService
 from tmdb_service import TMDBService
+
+# Load environment variables
+#load_dotenv()
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import logging
+
+# Environment variables are set in Render dashboard
+TMDB_API_KEY = os.getenv('TMDB_API_KEY')
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Movie Recommendation API")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+
 
 # Configure logging
 logging.basicConfig(
@@ -21,10 +53,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Environment variables
-TMDB_API_KEY = os.getenv('TMDB_API_KEY')
-ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -34,7 +62,8 @@ app = FastAPI(
 )
 
 # CORS configuration
-if ENVIRONMENT == 'production':
+environment = os.getenv('ENVIRONMENT', 'development')
+if environment == 'production':
     allowed_origins = [
         "https://your-vercel-app.vercel.app",
         # Add your production frontend URL here
@@ -122,18 +151,18 @@ async def startup_event():
         # Initialize model service
         model_service = ModelService()
         if model_service.is_ready():
-            logger.info("✅ Model service initialized successfully")
+            logger.info("Model service initialized successfully")
         else:
-            logger.warning("⚠️ Model service initialized but models may not be fully loaded")
+            logger.warning("Model service initialized but models may not be fully loaded")
         
         # Initialize TMDB service
         tmdb_service = TMDBService()
-        logger.info("✅ TMDB service initialized")
+        logger.info("TMDB service initialized")
         
-        logger.info("🚀 Backend server ready!")
+        logger.info("Backend server ready!")
         
     except Exception as e:
-        logger.error(f"❌ Error during startup: {e}", exc_info=True)
+        logger.error(f"Error during startup: {e}", exc_info=True)
 
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
@@ -419,6 +448,14 @@ async def get_movie_details(movie_id: int):
             'year': int(movie.get('release_year', 0)) if pd.notna(movie.get('release_year')) else None
         }
         
+        # Add movie features
+        movie_features = model_service._get_movie_features(movie_id)
+        movie_data['features'] = {
+            'avg_rating': movie_features.get('movie_avg_rating'),
+            'num_ratings': movie_features.get('movie_num_ratings'),
+            'rating_momentum': movie_features.get('movie_rating_momentum')
+        }
+        
         # Enrich with TMDB
         if tmdb_service:
             tmdb_data = tmdb_service.enrich_movie(
@@ -455,3 +492,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv('PORT', 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
