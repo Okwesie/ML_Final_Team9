@@ -35,8 +35,9 @@ class TMDBService:
 
     def __init__(self, api_key: Optional[str] = None, access_token: Optional[str] = None):
         # Support API key or Bearer token
-        self.api_key = api_key or os.getenv('TMDB_API_KEY')
-        self.access_token = access_token or os.getenv('TMDB_ACCESS_TOKEN')
+        self.api_key = api_key or '2987ff78d07868dcd9a70188fc5b2afe'
+        self.access_token = access_token or 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyOTg3ZmY3OGQwNzg2OGRjZDlhNzAxODhmYzViMmFmZSIsIm5iZiI6MTc2NjA4MzE1MS4wOTc5OTk4LCJzdWIiOiI2OTQ0NGE0Zjg5MzdhYmVjM2FkZWM3MDgiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.lANfnGrBUtANyW9MjgtPdQdV1Y2YxEM5vW-GmSQ5Db4'
+
         self.use_bearer = bool(self.access_token)
 
         if not self.api_key and not self.access_token:

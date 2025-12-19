@@ -21,13 +21,8 @@ from tmdb_service import TMDBService
 # Load environment variables
 #load_dotenv()
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-import os
-import logging
-
 # Environment variables are set in Render dashboard
-TMDB_API_KEY = os.getenv('TMDB_API_KEY')
+TMDB_API_KEY = '2987ff78d07868dcd9a70188fc5b2afe'
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -65,7 +60,7 @@ app = FastAPI(
 environment = os.getenv('ENVIRONMENT', 'development')
 if environment == 'production':
     allowed_origins = [
-        "https://your-vercel-app.vercel.app",
+        "https://v0-reelsense.vercel.app/",
         # Add your production frontend URL here
     ]
 else:
