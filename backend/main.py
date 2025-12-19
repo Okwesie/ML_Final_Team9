@@ -12,12 +12,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import pandas as pd
-
+import logging
 from model_service import ModelService
 from tmdb_service import TMDBService
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ app.add_middleware(
 model_service = None
 tmdb_service = None
 
-# Pydantic models for request validation
+# ✅ PYDANTIC MODELS - MATCH FRONTEND EXACTLY
 class PredictRatingRequest(BaseModel):
     user_movie_ids: list[int]
     target_movie_id: int
@@ -52,36 +50,54 @@ class SimilarMoviesRequest(BaseModel):
     top_n: int = 10
     model: str = "content"
 
-class SearchMoviesRequest(BaseModel):
-    query: str
-
 @app.on_event("startup")
 async def startup_event():
     global model_service, tmdb_service
     logger.info("Starting backend...")
-    model_service = ModelService()
-    tmdb_service = TMDBService()
-    logger.info("✓ Backend ready")
+    try:
+        model_service = ModelService()
+        tmdb_service = TMDBService()
+        logger.info("✓ Backend ready")
+    except Exception as e:
+        logger.error(f"✗ Failed to initialize services: {e}")
+        raise
 
 @app.get("/health")
 async def health():
     """Check backend health"""
+    if not model_service:
+        return {
+            "status": "degraded",
+            "models_loaded": [],
+            "data_ready": False
+        }
+    
     return {
-        "status": "healthy" if model_service and model_service.is_ready() else "degraded",
-        "models_loaded": model_service.get_available_models() if model_service else [],
-        "data_ready": model_service.movies_df is not None if model_service else False
+        "status": "healthy" if model_service.is_ready() else "degraded",
+        "models_loaded": model_service.get_available_models(),
+        "data_ready": model_service.movies_df is not None
+    }
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Movie Recommendation API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
     }
 
 @app.get("/api/movies/search")
 async def search_movies(query: str):
     """Search for movies by title"""
-    if not model_service or not model_service.movies_df is not None:
+    if not model_service or model_service.movies_df is None:
         raise HTTPException(status_code=503, detail="Movies data not loaded")
     
     try:
         results = model_service.movies_df[
             model_service.movies_df['title'].str.contains(query, case=False, na=False)
-        ].head(10).to_dict('records')
+        ].head(20).to_dict('records')
         
         return {
             "results": [
@@ -92,7 +108,8 @@ async def search_movies(query: str):
                     "year": int(r.get('release_year', 0)) if r.get('release_year') else None
                 }
                 for r in results
-            ]
+            ],
+            "count": len(results)
         }
     except Exception as e:
         logger.error(f"Search error: {e}")
@@ -100,14 +117,14 @@ async def search_movies(query: str):
 
 @app.get("/api/movies/{movie_id}")
 async def get_movie_details(movie_id: int):
-    """Get movie details"""
+    """Get movie details by ID"""
     if not model_service or model_service.movies_df is None:
         raise HTTPException(status_code=503, detail="Movies data not loaded")
     
     try:
         movie = model_service.movies_df[model_service.movies_df['movieId'] == movie_id]
         if movie.empty:
-            raise HTTPException(status_code=404, detail="Movie not found")
+            raise HTTPException(status_code=404, detail=f"Movie {movie_id} not found")
         
         m = movie.iloc[0]
         return {
@@ -129,7 +146,7 @@ async def predict_rating(request: PredictRatingRequest):
         raise HTTPException(status_code=503, detail="Models not loaded")
     
     try:
-        logger.info(f"Predicting rating for movie {request.target_movie_id}")
+        logger.info(f"[PREDICT] user_movies={request.user_movie_ids}, target={request.target_movie_id}, model={request.model}")
         
         pred_rating, confidence = model_service.predict_rating(
             user_movie_ids=request.user_movie_ids,
@@ -158,7 +175,7 @@ async def predict_rating(request: PredictRatingRequest):
             "model_used": request.model
         }
     except Exception as e:
-        logger.error(f"Prediction error: {e}")
+        logger.error(f"Prediction error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/recommend/personalized")
@@ -168,7 +185,7 @@ async def get_recommendations(request: RecommendationsRequest):
         raise HTTPException(status_code=503, detail="Models not loaded")
     
     try:
-        logger.info(f"Getting recommendations for movies: {request.movie_ids}")
+        logger.info(f"[RECOMMEND] movies={request.movie_ids}, top_n={request.top_n}, model={request.model}")
         
         recommendations = model_service.get_recommendations(
             user_movie_ids=request.movie_ids,
@@ -182,7 +199,7 @@ async def get_recommendations(request: RecommendationsRequest):
             "count": len(recommendations)
         }
     except Exception as e:
-        logger.error(f"Recommendations error: {e}")
+        logger.error(f"Recommendations error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/recommend/similar")
@@ -192,7 +209,7 @@ async def find_similar_movies(request: SimilarMoviesRequest):
         raise HTTPException(status_code=503, detail="Movies data not loaded")
     
     try:
-        logger.info(f"Finding similar movies to {request.movie_id}")
+        logger.info(f"[SIMILAR] movie_id={request.movie_id}, top_n={request.top_n}")
         
         similar = model_service.find_similar_movies(
             movie_id=request.movie_id,
@@ -220,7 +237,7 @@ async def find_similar_movies(request: SimilarMoviesRequest):
             "count": len(similar)
         }
     except Exception as e:
-        logger.error(f"Similar movies error: {e}")
+        logger.error(f"Similar movies error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

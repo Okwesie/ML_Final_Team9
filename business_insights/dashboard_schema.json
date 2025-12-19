@@ -1,0 +1,14 @@
+{
+    "figures": [
+        "rating_distribution.png",
+        "user_generosity.png",
+        "rating_trends_year.png",
+        "genre_performance.png",
+        "hidden_gems.png"
+    ],
+    "tables": [
+        "top_genres.csv",
+        "hidden_gems.csv",
+        "genre_affinity_clusters.csv"
+    ]
+}
