@@ -15,15 +15,16 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
+
 class ModelService:
     """Service for loading and using trained ML models"""
     
     def __init__(self, models_dir: str = None, data_dir: str = None):
         # Default to parent directory (where notebook saves models)
         if models_dir is None:
-            models_dir = Path(__file__).parent.parent / "models"
+            models_dir = Path(__file__).parent / "models"
         if data_dir is None:
-            data_dir = Path(__file__).parent.parent / "data"
+            data_dir = Path(__file__).parent / "data"
         
         self.models_dir = Path(models_dir)
         self.data_dir = Path(data_dir)
@@ -48,7 +49,7 @@ class ModelService:
         """Load movies and ratings data"""
         try:
             # Load movies (from parent directory)
-            movies_path = Path(__file__).parent.parent / "movies.csv"
+            movies_path = Path(__file__).parent / "movies.csv"
             if movies_path.exists():
                 self.movies_df = pd.read_csv(movies_path)
                 self.movies_df['genres_list'] = self.movies_df['genres'].str.split('|')
@@ -57,7 +58,7 @@ class ModelService:
                 logger.info(f"Loaded {len(self.movies_df)} movies")
             
             # Load ratings (sample for performance)
-            ratings_path = Path(__file__).parent.parent / "ratings.csv"
+            ratings_path = Path(__file__).parent / "ratings.csv"
             if ratings_path.exists():
                 self.ratings_df = pd.read_csv(ratings_path, nrows=500000)
                 self.ratings_df['date'] = pd.to_datetime(self.ratings_df['timestamp'], unit='s')
