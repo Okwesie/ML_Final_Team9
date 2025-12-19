@@ -12,14 +12,14 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 
 import pandas as pd
 from model_service import ModelService
 from tmdb_service import TMDBService
 
 # Load environment variables
-load_dotenv()
+#load_dotenv()
 
 # Configure logging
 logging.basicConfig(
