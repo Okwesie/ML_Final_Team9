@@ -86,9 +86,9 @@ class ModelService:
                 logger.warning("Content-based model files not found")
             
             # Load Model 2: Hybrid
-            hybrid_model_path = self.models_dir / "hhybrid_collaborative_content_model.pkl"
-            hybrid_scaler_path = self.models_dir / "hhybrid_scaler.pkl"
-            svd_model_path = self.models_dir / "ssvd_model.pkl"
+            hybrid_model_path = self.models_dir / "1hybrid_collaborative_content_model.pkl"
+            hybrid_scaler_path = self.models_dir / "1hybrid_scaler.pkl"
+            svd_model_path = self.models_dir / "1svd_model.pkl"
             
             if hybrid_model_path.exists() and hybrid_scaler_path.exists():
                 try:
