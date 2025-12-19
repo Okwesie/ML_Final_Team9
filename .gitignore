@@ -1,12 +1,12 @@
 # Large data files
-*.csv
 *.pkl
 *.pickle
 
 # Models directory
-
+models/
 
 # Data files
+ratings.csv
 genome-scores.csv
 tags.csv
 links.csv
@@ -32,3 +32,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
+backend/models/*.pkl
+backend/data/*.pkl
+*.csv

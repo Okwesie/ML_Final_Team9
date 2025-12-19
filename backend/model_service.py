@@ -1,6 +1,7 @@
 """
 Model Service
 Handles ML model loading, feature preparation, and predictions
+Downloads models from Google Drive if not present locally
 """
 import os
 import json
@@ -12,22 +13,45 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 import logging
 from functools import lru_cache
+import requests
+from urllib.parse import urljoin
+import gdown
 
 logger = logging.getLogger(__name__)
 
+# Google Drive folder ID containing models
+GOOGLE_DRIVE_FOLDER_ID = "1jTX2MerREvKvSdMjHCKQSGyxH9CNxGdE"
 
 class ModelService:
     """Service for loading and using trained ML models"""
     
+    # Model file mappings (filename -> Google Drive file ID)
+    MODEL_FILES = {
+        "advanced_content_based_model.pkl": "1Abc123def456ghi789",  # Replace with actual IDs
+        "content_scaler.pkl": "2Xyz789abc456def123",
+        "hybrid_collaborative_content_model.pkl": "3Qwe456rty789uio012",
+        "hybrid_scaler.pkl": "4Asd123fgh456jkl789",
+        "svd_model.pkl": "5Zxc789vbn456mno012",
+        "feature_names.json": "6Poi789uik456lmn012",
+        "movie_features.pkl": "7Lkj456mno789pqr012"
+    }
+    
     def __init__(self, models_dir: str = None, data_dir: str = None):
-        # Default to parent directory (where notebook saves models)
+        # Load from backend/models and backend/data directories
         if models_dir is None:
-            models_dir = Path(__file__).parent / "models"
+            models_dir = Path(__file__).parent / "models"  # backend/models
         if data_dir is None:
-            data_dir = Path(__file__).parent / "data"
+            data_dir = Path(__file__).parent / "data"      # backend/data
         
         self.models_dir = Path(models_dir)
         self.data_dir = Path(data_dir)
+        
+        # Create directories if they don't exist
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Models directory: {self.models_dir}")
+        logger.info(f"Data directory: {self.data_dir}")
         
         self.models = {}
         self.scalers = {}
@@ -41,88 +65,241 @@ class ModelService:
         self.genome_embeddings_df = None
         
         self._load_data()
+        self._ensure_models_exist()  # Download if missing
         self._load_models()
         self._load_feature_cache()
         self._precompute_features()
     
+    def _download_file_from_gdrive(self, file_id: str, output_path: Path) -> bool:
+        """
+        Download a file from Google Drive using gdown
+        
+        Args:
+            file_id: Google Drive file ID
+            output_path: Path to save the file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Downloading {output_path.name} from Google Drive...")
+            url = f"https://drive.google.com/uc?id={file_id}"
+            gdown.download(url, str(output_path), quiet=False)
+            
+            if output_path.exists():
+                logger.info(f"✓ Downloaded {output_path.name} ({output_path.stat().st_size / 1e6:.1f} MB)")
+                return True
+            else:
+                logger.error(f"✗ Download failed: {output_path.name} not created")
+                return False
+        except Exception as e:
+            logger.error(f"Error downloading {output_path.name}: {e}")
+            return False
+    
+    def _download_from_folder(self, folder_id: str, output_dir: Path) -> bool:
+        """
+        Download all files from a Google Drive folder
+        
+        Args:
+            folder_id: Google Drive folder ID
+            output_dir: Directory to save files
+            
+        Returns:
+            True if all files downloaded successfully
+        """
+        try:
+            logger.info(f"Downloading models from Google Drive folder {folder_id}...")
+            gdown.download_folder(
+                url=f"https://drive.google.com/drive/folders/{folder_id}",
+                output=str(output_dir),
+                quiet=False,
+                use_cookies=False
+            )
+            logger.info(f"✓ Downloaded all files from Google Drive folder")
+            return True
+        except Exception as e:
+            logger.error(f"Error downloading from Google Drive folder: {e}")
+            return False
+    
+    def _ensure_models_exist(self):
+        """
+        Check if all required model files exist locally.
+        If not, download them from Google Drive.
+        """
+        required_files = [
+            "advanced_content_based_model.pkl",
+            "content_scaler.pkl",
+            "hybrid_collaborative_content_model.pkl",
+            "hybrid_scaler.pkl",
+            "svd_model.pkl",
+            "feature_names.json"
+        ]
+        
+        missing_files = []
+        for filename in required_files:
+            file_path = self.models_dir / filename
+            if not file_path.exists():
+                missing_files.append(filename)
+        
+        if not missing_files:
+            logger.info("✓ All model files present locally")
+            return
+        
+        logger.warning(f"Missing {len(missing_files)} model files: {missing_files}")
+        logger.info("Attempting to download from Google Drive...")
+        
+        # Try downloading entire folder first (faster)
+        try:
+            success = self._download_from_folder(GOOGLE_DRIVE_FOLDER_ID, self.models_dir)
+            if success:
+                logger.info("✓ Successfully downloaded all models from Google Drive")
+                return
+        except Exception as e:
+            logger.warning(f"Folder download failed, trying individual files: {e}")
+        
+        # Fallback: download individual files
+        for filename in missing_files:
+            file_path = self.models_dir / filename
+            file_id = self.MODEL_FILES.get(filename)
+            
+            if file_id:
+                self._download_file_from_gdrive(file_id, file_path)
+            else:
+                logger.warning(f"No Google Drive ID configured for {filename}")
+        
+        # Check if critical files were downloaded
+        critical_files = [
+            self.models_dir / "advanced_content_based_model.pkl",
+            self.models_dir / "content_scaler.pkl"
+        ]
+        
+        missing_critical = [f for f in critical_files if not f.exists()]
+        if missing_critical:
+            logger.error(f"Critical model files still missing: {missing_critical}")
+            logger.error("Models will not be available. Please manually download from:")
+            logger.error(f"https://drive.google.com/drive/folders/{GOOGLE_DRIVE_FOLDER_ID}")
+    
     def _load_data(self):
         """Load movies and ratings data"""
         try:
-            # Load movies (from parent directory)
-            movies_path = Path(__file__).parent / "movies.csv"
+            # Load movies from backend parent directory
+            movies_path = Path(__file__).parent.parent / "movies.csv"
             if movies_path.exists():
                 self.movies_df = pd.read_csv(movies_path)
                 self.movies_df['genres_list'] = self.movies_df['genres'].str.split('|')
                 self.movies_df['release_year'] = self.movies_df['title'].str.extract(r'\((\d{4})\)').astype(float)
                 self.movies_df['genre_count'] = self.movies_df['genres_list'].apply(len)
-                logger.info(f"Loaded {len(self.movies_df)} movies")
+                logger.info(f"Loaded {len(self.movies_df)} movies from {movies_path}")
+            else:
+                logger.warning(f"Movies file not found at {movies_path}")
             
-            # Load ratings (sample for performance)
-            ratings_path = Path(__file__).parent / "ratings.csv"
+            # Load ratings from backend parent directory
+            ratings_path = Path(__file__).parent.parent / "ratings.csv"
             if ratings_path.exists():
                 self.ratings_df = pd.read_csv(ratings_path, nrows=500000)
                 self.ratings_df['date'] = pd.to_datetime(self.ratings_df['timestamp'], unit='s')
-                logger.info(f"Loaded {len(self.ratings_df)} ratings")
+                logger.info(f"Loaded {len(self.ratings_df)} ratings from {ratings_path}")
+            else:
+                logger.warning(f"Ratings file not found at {ratings_path}")
         except Exception as e:
             logger.error(f"Error loading data: {e}")
     
     def _load_models(self):
-        """Load all trained models and scalers"""
+        """Load all trained models and scalers from backend/models directory"""
         try:
             # Load feature names
             feature_file = self.models_dir / "feature_names.json"
             if feature_file.exists():
                 with open(feature_file, 'r') as f:
                     self.feature_names = json.load(f)
+                logger.info("Loaded feature names")
+            else:
+                logger.warning(f"Feature names not found at {feature_file}")
             
             # Load Model 1: Content-Based
             content_model_path = self.models_dir / "advanced_content_based_model.pkl"
             content_scaler_path = self.models_dir / "content_scaler.pkl"
             
             if content_model_path.exists() and content_scaler_path.exists():
-                self.models['content'] = joblib.load(content_model_path)
-                self.scalers['content'] = joblib.load(content_scaler_path)
-                logger.info("Loaded content-based model")
+                try:
+                    self.models['content'] = joblib.load(content_model_path)
+                    self.scalers['content'] = joblib.load(content_scaler_path)
+                    logger.info("✓ Loaded content-based model")
+                except Exception as e:
+                    logger.error(f"Error loading content-based model: {e}")
             else:
-                logger.warning("Content-based model files not found")
+                logger.warning(f"Content-based model files not found")
+                logger.warning(f"  Expected: {content_model_path}")
+                logger.warning(f"  Expected: {content_scaler_path}")
             
-            # Load Model 2: Hybrid
-            hybrid_model_path = self.models_dir / "1hybrid_collaborative_content_model.pkl"
-            hybrid_scaler_path = self.models_dir / "1hybrid_scaler.pkl"
-            svd_model_path = self.models_dir / "1svd_model.pkl"
+            # Load Model 2: Hybrid (check for both naming patterns)
+            hybrid_model_paths = [
+                self.models_dir / "hybrid_collaborative_content_model.pkl",
+                self.models_dir / "1hybrid_collaborative_content_model.pkl",
+            ]
+            hybrid_scaler_paths = [
+                self.models_dir / "hybrid_scaler.pkl",
+                self.models_dir / "1hybrid_scaler.pkl",
+            ]
+            svd_model_paths = [
+                self.models_dir / "svd_model.pkl",
+                self.models_dir / "1svd_model.pkl",
+            ]
             
-            if hybrid_model_path.exists() and hybrid_scaler_path.exists():
+            hybrid_model_path = None
+            hybrid_scaler_path = None
+            svd_model_path = None
+            
+            # Find actual files
+            for path in hybrid_model_paths:
+                if path.exists():
+                    hybrid_model_path = path
+                    break
+            
+            for path in hybrid_scaler_paths:
+                if path.exists():
+                    hybrid_scaler_path = path
+                    break
+            
+            for path in svd_model_paths:
+                if path.exists():
+                    svd_model_path = path
+                    break
+            
+            if hybrid_model_path and hybrid_scaler_path:
                 try:
                     self.models['hybrid'] = joblib.load(hybrid_model_path)
                     self.scalers['hybrid'] = joblib.load(hybrid_scaler_path)
+                    logger.info("✓ Loaded hybrid model")
                     
-                    if svd_model_path.exists():
+                    if svd_model_path:
                         try:
                             self.models['svd'] = joblib.load(svd_model_path)
-                            logger.info("Loaded hybrid model with SVD")
+                            logger.info("✓ Loaded hybrid model with SVD")
                         except Exception as svd_error:
-                            logger.warning(f"Could not load SVD model: {svd_error}. Hybrid model will work without SVD component.")
+                            logger.warning(f"Could not load SVD model: {svd_error}")
                     else:
-                        logger.warning("SVD model not found, hybrid model may not work correctly")
+                        logger.warning("SVD model not found, hybrid model will work without SVD component")
                 except (ModuleNotFoundError, AttributeError) as e:
                     if '_loss' in str(e) or 'sklearn' in str(e).lower():
-                        logger.error(f"scikit-learn version mismatch when loading hybrid model: {e}")
-                        logger.error("This usually means the model was saved with a different scikit-learn version.")
-                        logger.error("Solution: Re-save the model with the current scikit-learn version, or match versions.")
-                        logger.warning("Hybrid model will not be available. Content-based model will be used as fallback.")
+                        logger.error(f"scikit-learn version mismatch: {e}")
+                        logger.error("Solution: Re-save models with current scikit-learn v1.5.1")
+                        logger.warning("Hybrid model will not be available. Using content-based fallback.")
                     else:
                         raise
                 except Exception as e:
                     logger.error(f"Error loading hybrid model: {e}")
-                    logger.warning("Hybrid model will not be available. Content-based model will be used as fallback.")
+                    logger.warning("Hybrid model will not be available. Using content-based fallback.")
             else:
-                logger.warning("Hybrid model files not found")
+                logger.warning("Hybrid model files not found in backend/models/")
+                logger.warning(f"  Checked for: hybrid_collaborative_content_model.pkl")
+                logger.warning(f"  Checked for: hybrid_scaler.pkl")
                 
         except Exception as e:
             logger.error(f"Error loading models: {e}")
     
     def _load_feature_cache(self):
-        """Load pre-computed TF-IDF and genome embeddings from notebook"""
+        """Load pre-computed TF-IDF and genome embeddings from backend/data directory"""
         feature_cache_path = self.data_dir / "movie_features.pkl"
         
         if feature_cache_path.exists():
@@ -132,7 +309,7 @@ class ModelService:
                 self.genome_embeddings_df = feature_cache.get('genome_embeddings_df')
                 
                 if self.genre_tfidf_df is not None and self.genome_embeddings_df is not None:
-                    logger.info(f"Loaded feature cache from {feature_cache_path}")
+                    logger.info(f"✓ Loaded feature cache from {feature_cache_path}")
                     logger.info(f"  - Genre TF-IDF shape: {self.genre_tfidf_df.shape}")
                     logger.info(f"  - Genome embeddings shape: {self.genome_embeddings_df.shape}")
                 else:
@@ -143,11 +320,11 @@ class ModelService:
         else:
             logger.warning(f"Feature cache not found at {feature_cache_path}")
             logger.warning("Using simplified features (zeros) - predictions may be less accurate")
-            logger.info("See SAVE_FEATURES_FOR_BACKEND.md for instructions to improve accuracy")
     
     def _precompute_features(self):
         """Pre-compute movie-level features for faster predictions"""
         if self.movies_df is None or self.ratings_df is None:
+            logger.warning("Cannot pre-compute features: movies_df or ratings_df is None")
             return
         
         try:
@@ -196,7 +373,6 @@ class ModelService:
     def _get_user_features(self, movie_ids: List[int]) -> Dict:
         """Extract user features from selected movies"""
         if not movie_ids or self.ratings_df is None:
-            # Default features for new user
             return {
                 'user_avg_rating': 3.5,
                 'user_rating_std': 0.0,
@@ -209,11 +385,9 @@ class ModelService:
                 'user_ratings_per_day': 0.0
             }
         
-        # Get ratings for selected movies (simulate user preferences)
         user_ratings = self.ratings_df[self.ratings_df['movieId'].isin(movie_ids)]
         
         if len(user_ratings) == 0:
-            # Use movie averages as proxy
             movie_ratings = []
             for mid in movie_ids:
                 movie_data = self.movie_features_cache.get(mid, {})
@@ -227,7 +401,6 @@ class ModelService:
         else:
             ratings_array = user_ratings['rating'].values
         
-        # Calculate user statistics
         user_features = {
             'user_avg_rating': float(np.mean(ratings_array)),
             'user_rating_std': float(np.std(ratings_array)) if len(ratings_array) > 1 else 0.0,
@@ -238,7 +411,6 @@ class ModelService:
             'user_rating_variance': float(np.var(ratings_array)) if len(ratings_array) > 1 else 0.0,
         }
         
-        # Genre diversity
         if self.movies_df is not None:
             user_movies = self.movies_df[self.movies_df['movieId'].isin(movie_ids)]
             all_genres = []
@@ -249,8 +421,7 @@ class ModelService:
         else:
             user_features['user_genre_diversity'] = 0
         
-        # Activity patterns (simulated)
-        user_features['user_ratings_per_day'] = len(movie_ids) / 30.0  # Assume 30 days
+        user_features['user_ratings_per_day'] = len(movie_ids) / 30.0
         
         return user_features
     
@@ -259,7 +430,6 @@ class ModelService:
         if movie_id in self.movie_features_cache:
             return self.movie_features_cache[movie_id]
         
-        # Default features if movie not in cache
         return {
             'movie_avg_rating': 3.5,
             'movie_rating_std': 0.5,
@@ -274,7 +444,6 @@ class ModelService:
         user_features = self._get_user_features(user_movie_ids)
         movie_features = self._get_movie_features(target_movie_id)
         
-        # Get movie metadata
         movie_row = self.movies_df[self.movies_df['movieId'] == target_movie_id]
         if movie_row.empty:
             release_year = 2000
@@ -285,31 +454,21 @@ class ModelService:
             genre_count = int(movie_row.iloc[0].get('genre_count', 2))
             movie_age = 2024 - release_year
         
-        # Temporal features (current time)
         now = datetime.now()
         movie_age_at_rating = movie_age
-        days_since_join = 30  # Simulated
+        days_since_join = 30
         rating_velocity = len(user_movie_ids) / max(days_since_join, 1)
         
-        # TF-IDF features - use actual if available, otherwise zeros
         if self.genre_tfidf_df is not None and target_movie_id in self.genre_tfidf_df.index:
             genre_tfidf = self.genre_tfidf_df.loc[target_movie_id].values
         else:
-            # Fallback: use zeros (predictions will work but may be less accurate)
             genre_tfidf = np.zeros(50)
-            if self.genre_tfidf_df is None:
-                logger.debug(f"TF-IDF features not available, using zeros for movie {target_movie_id}")
         
-        # Genome embeddings - use actual if available, otherwise zeros
         if self.genome_embeddings_df is not None and target_movie_id in self.genome_embeddings_df.index:
             genome_emb = self.genome_embeddings_df.loc[target_movie_id].values
         else:
-            # Fallback: use zeros (predictions will work but may be less accurate)
             genome_emb = np.zeros(50)
-            if self.genome_embeddings_df is None:
-                logger.debug(f"Genome embeddings not available, using zeros for movie {target_movie_id}")
         
-        # Build feature vector matching feature_names.json order
         features = np.array([
             user_features['user_avg_rating'],
             user_features['user_rating_std'],
@@ -333,7 +492,7 @@ class ModelService:
             now.year,
             now.month,
             now.hour,
-            1 if now.weekday() >= 5 else 0,  # is_weekend
+            1 if now.weekday() >= 5 else 0,
         ] + list(genre_tfidf) + list(genome_emb))
         
         return features
@@ -343,16 +502,13 @@ class ModelService:
         user_features = self._get_user_features(user_movie_ids)
         movie_features = self._get_movie_features(target_movie_id)
         
-        # Get SVD prediction
-        svd_prediction = 3.5  # Default
+        svd_prediction = 3.5
         if 'svd' in self.models and user_movie_ids:
             try:
-                # Simulate SVD prediction (would need actual user ID)
                 svd_prediction = movie_features.get('movie_avg_rating', 3.5)
             except:
                 pass
         
-        # Temporal features
         now = datetime.now()
         movie_row = self.movies_df[self.movies_df['movieId'] == target_movie_id]
         if not movie_row.empty:
@@ -364,7 +520,6 @@ class ModelService:
         days_since_join = 30
         rating_velocity = len(user_movie_ids) / max(days_since_join, 1)
         
-        # Build feature vector matching hybrid_features from feature_names.json
         features = np.array([
             svd_prediction,
             user_features['user_avg_rating'],
@@ -383,26 +538,19 @@ class ModelService:
     
     def predict_rating(self, user_movie_ids: List[int], target_movie_id: int, 
                       model_type: str = 'content') -> Tuple[float, float]:
-        """
-        Predict rating for a user-movie pair
-        
-        Returns:
-            (predicted_rating, confidence)
-        """
-        # Fallback to content if hybrid not available
+        """Predict rating for a user-movie pair. Returns (predicted_rating, confidence)"""
         if model_type not in self.models:
             if model_type == 'hybrid' and 'content' in self.models:
                 logger.warning(f"Hybrid model not available, falling back to content-based model")
                 model_type = 'content'
             elif model_type == 'content' and 'content' not in self.models:
                 logger.error("Content-based model not available")
-                return 3.5, 0.5  # Default fallback
+                return 3.5, 0.5
         
         if model_type not in self.models:
-            return 3.5, 0.5  # Default fallback
+            return 3.5, 0.5
         
         try:
-            # Prepare features
             if model_type == 'content':
                 features = self._prepare_content_features(user_movie_ids, target_movie_id)
                 scaler = self.scalers['content']
@@ -410,18 +558,13 @@ class ModelService:
                 features = self._prepare_hybrid_features(user_movie_ids, target_movie_id)
                 scaler = self.scalers['hybrid']
             
-            # Scale features
             features_scaled = scaler.transform([features])
-            
-            # Predict
             model = self.models[model_type]
             predicted_rating = float(model.predict(features_scaled)[0])
             
-            # Clamp to valid range
             predicted_rating = max(0.5, min(5.0, predicted_rating))
             
-            # Calculate confidence (simplified)
-            confidence = 0.7 + 0.3 * (len(user_movie_ids) / 10.0)  # More movies = higher confidence
+            confidence = 0.7 + 0.3 * (len(user_movie_ids) / 10.0)
             confidence = min(1.0, confidence)
             
             return predicted_rating, confidence
@@ -432,16 +575,11 @@ class ModelService:
     
     def get_recommendations(self, user_movie_ids: List[int], top_n: int = 10,
                            model_type: str = 'content') -> List[Dict]:
-        """
-        Get top N recommendations for a user based on selected movies
-        
-        Returns:
-            List of movie recommendations with scores
-        """
+        """Get top N recommendations for a user based on selected movies"""
         if self.movies_df is None:
+            logger.error("Movies data not loaded")
             return []
         
-        # Fallback to content if hybrid not available
         if model_type not in self.models:
             if model_type == 'hybrid' and 'content' in self.models:
                 logger.warning(f"Hybrid model not available, using content-based model")
@@ -450,14 +588,10 @@ class ModelService:
                 logger.error(f"Model {model_type} not available")
                 return []
         
-        # Get all movies user hasn't selected
         all_movie_ids = self.movies_df['movieId'].tolist()
         candidate_movies = [mid for mid in all_movie_ids if mid not in user_movie_ids]
-        
-        # Limit candidates for performance
         candidate_movies = candidate_movies[:1000]
         
-        # Predict ratings for all candidates
         predictions = []
         for movie_id in candidate_movies:
             try:
@@ -468,16 +602,14 @@ class ModelService:
                     'movieId': movie_id,
                     'predicted_rating': pred_rating,
                     'confidence': confidence,
-                    'score': pred_rating * confidence  # Combined score
+                    'score': pred_rating * confidence
                 })
             except Exception as e:
                 logger.error(f"Error predicting for movie {movie_id}: {e}")
                 continue
         
-        # Sort by score and return top N
         predictions.sort(key=lambda x: x['score'], reverse=True)
         
-        # Enrich with movie details
         recommendations = []
         for pred in predictions[:top_n]:
             movie_id = pred['movieId']
@@ -498,12 +630,7 @@ class ModelService:
         return recommendations
     
     def find_similar_movies(self, movie_id: int, top_n: int = 10) -> List[Dict]:
-        """
-        Find movies similar to a given movie using content-based features
-        
-        Returns:
-            List of similar movies with similarity scores
-        """
+        """Find movies similar to a given movie using content-based features"""
         if self.movies_df is None:
             return []
         
@@ -514,23 +641,19 @@ class ModelService:
         target_genres = target_movie.iloc[0].get('genres_list', [])
         target_year = target_movie.iloc[0].get('release_year', 2000)
         
-        # Calculate similarity to all other movies
         similarities = []
         for _, movie in self.movies_df.iterrows():
             if movie['movieId'] == movie_id:
                 continue
             
-            # Genre similarity
             movie_genres = movie.get('genres_list', [])
             genre_overlap = len(set(target_genres) & set(movie_genres))
             genre_similarity = genre_overlap / max(len(set(target_genres) | set(movie_genres)), 1)
             
-            # Year similarity (closer years = more similar)
             movie_year = movie.get('release_year', 2000)
             year_diff = abs(target_year - movie_year)
-            year_similarity = 1.0 / (1.0 + year_diff / 10.0)  # Decay with year difference
+            year_similarity = 1.0 / (1.0 + year_diff / 10.0)
             
-            # Combined similarity
             similarity = 0.7 * genre_similarity + 0.3 * year_similarity
             
             similarities.append({
@@ -541,7 +664,6 @@ class ModelService:
                 'similarity_score': similarity
             })
         
-        # Sort by similarity and return top N
         similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
         return similarities[:top_n]
     
