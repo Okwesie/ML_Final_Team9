@@ -16,11 +16,16 @@ from functools import lru_cache
 import requests
 from urllib.parse import urljoin
 import gdown
+import io
 
 logger = logging.getLogger(__name__)
 
 # Google Drive folder ID containing models
 GOOGLE_DRIVE_FOLDER_ID = "1jTX2MerREvKvSdMjHCKQSGyxH9CNxGdE"
+
+# Google Drive file IDs for data CSVs
+MOVIES_CSV_ID = "movies.csv"  # Replace with actual Google Drive file ID
+RATINGS_CSV_ID = "ratings.csv"  # Replace with actual Google Drive file ID
 
 class ModelService:
     """Service for loading and using trained ML models"""
@@ -69,6 +74,34 @@ class ModelService:
         self._load_models()
         self._load_feature_cache()
         self._precompute_features()
+    
+    def _download_csv_from_gdrive(self, file_id: str, csv_name: str) -> Optional[pd.DataFrame]:
+        """
+        Download a CSV file directly from Google Drive and load as DataFrame
+        
+        Args:
+            file_id: Google Drive file ID
+            csv_name: Name of the CSV file (for logging)
+            
+        Returns:
+            pandas DataFrame or None if download fails
+        """
+        try:
+            logger.info(f"Downloading {csv_name} from Google Drive...")
+            url = f"https://drive.google.com/uc?id={file_id}"
+            
+            # Download directly to memory
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            # Load CSV from bytes
+            df = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
+            logger.info(f"✓ Downloaded {csv_name} ({len(df)} rows)")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error downloading {csv_name} from Google Drive: {e}")
+            return None
     
     def _download_file_from_gdrive(self, file_id: str, output_path: Path) -> bool:
         """
@@ -180,27 +213,55 @@ class ModelService:
             logger.error(f"https://drive.google.com/drive/folders/{GOOGLE_DRIVE_FOLDER_ID}")
     
     def _load_data(self):
-        """Load movies and ratings data"""
+        """Load movies and ratings data from Google Drive or local fallback"""
         try:
-            # Load movies from backend parent directory
-            movies_path = Path(__file__).parent.parent / "movies.csv"
-            if movies_path.exists():
-                self.movies_df = pd.read_csv(movies_path)
+            # Try loading from Google Drive first
+            logger.info("Attempting to load data from Google Drive...")
+            
+            movies_df = None
+            ratings_df = None
+            
+            # Download movies.csv from Google Drive
+            if MOVIES_CSV_ID and MOVIES_CSV_ID != "1xyz123movies":
+                movies_df = self._download_csv_from_gdrive(MOVIES_CSV_ID, "movies.csv")
+            
+            # Download ratings.csv from Google Drive
+            if RATINGS_CSV_ID and RATINGS_CSV_ID != "1xyz123ratings":
+                ratings_df = self._download_csv_from_gdrive(RATINGS_CSV_ID, "ratings.csv")
+            
+            # Fallback to local files if Google Drive download fails
+            if movies_df is None:
+                logger.info("Falling back to local movies.csv...")
+                movies_path = Path(__file__).parent.parent / "movies.csv"
+                if movies_path.exists():
+                    movies_df = pd.read_csv(movies_path)
+                    logger.info(f"Loaded {len(movies_df)} movies from {movies_path}")
+                else:
+                    logger.warning(f"Movies file not found at {movies_path}")
+            
+            if ratings_df is None:
+                logger.info("Falling back to local ratings.csv...")
+                ratings_path = Path(__file__).parent.parent / "ratings.csv"
+                if ratings_path.exists():
+                    ratings_df = pd.read_csv(ratings_path, nrows=500000)
+                    logger.info(f"Loaded {len(ratings_df)} ratings from {ratings_path}")
+                else:
+                    logger.warning(f"Ratings file not found at {ratings_path}")
+            
+            # Process movies dataframe
+            if movies_df is not None:
+                self.movies_df = movies_df
                 self.movies_df['genres_list'] = self.movies_df['genres'].str.split('|')
                 self.movies_df['release_year'] = self.movies_df['title'].str.extract(r'\((\d{4})\)').astype(float)
                 self.movies_df['genre_count'] = self.movies_df['genres_list'].apply(len)
-                logger.info(f"Loaded {len(self.movies_df)} movies from {movies_path}")
-            else:
-                logger.warning(f"Movies file not found at {movies_path}")
+                logger.info(f"✓ Processed {len(self.movies_df)} movies")
             
-            # Load ratings from backend parent directory
-            ratings_path = Path(__file__).parent.parent / "ratings.csv"
-            if ratings_path.exists():
-                self.ratings_df = pd.read_csv(ratings_path, nrows=500000)
+            # Process ratings dataframe
+            if ratings_df is not None:
+                self.ratings_df = ratings_df
                 self.ratings_df['date'] = pd.to_datetime(self.ratings_df['timestamp'], unit='s')
-                logger.info(f"Loaded {len(self.ratings_df)} ratings from {ratings_path}")
-            else:
-                logger.warning(f"Ratings file not found at {ratings_path}")
+                logger.info(f"✓ Processed {len(self.ratings_df)} ratings")
+        
         except Exception as e:
             logger.error(f"Error loading data: {e}")
     
