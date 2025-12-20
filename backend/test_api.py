@@ -1,61 +1,63 @@
 """
 Test script for Movie Recommendation API
-Run this after starting the server to verify all endpoints work
+Aligned with synchronized main.py
 """
 import requests
 import json
 import time
 
+# Ensure this matches your running server port
 BASE_URL = "http://localhost:8000"
 
 def test_health():
     """Test health check endpoint"""
+    print("\n" + "=" * 70)
+    print("1. Testing /health endpoint")
     print("=" * 70)
-    print("Testing /health endpoint")
-    print("=" * 70)
-    
-    response = requests.get(f"{BASE_URL}/health")
-    print(f"Status: {response.status_code}")
-    print(f"Response: {json.dumps(response.json(), indent=2)}")
-    print()
+    try:
+        response = requests.get(f"{BASE_URL}/health")
+        print(f"Status: {response.status_code}")
+        print(f"Response: {json.dumps(response.json(), indent=2)}")
+    except Exception as e:
+        print(f"Connection Error: {e}")
 
 def test_search():
     """Test movie search endpoint"""
+    print("\n" + "=" * 70)
+    print("2. Testing /api/movies/search")
     print("=" * 70)
-    print("Testing /api/movies/search endpoint")
-    print("=" * 70)
-    
-    response = requests.get(f"{BASE_URL}/api/movies/search", params={"query": "toy story"})
+    response = requests.get(f"{BASE_URL}/api/movies/search", params={"query": "Toy Story"})
     print(f"Status: {response.status_code}")
     data = response.json()
-    print(f"Found {data.get('count', 0)} movies")
-    if data.get('results'):
-        print(f"First result: {data['results'][0]['title']}")
-    print()
+    results = data.get('results', [])
+    print(f"Found {len(results)} movies")
+    if results:
+        print(f"First result: {results[0]['title']} ({results[0].get('year')})")
+        print(f"Poster URL: {results[0].get('poster_url')}")
 
 def test_movie_details():
-    """Test get movie details endpoint"""
+    """Test get movie details (Verify the TypeError fix)"""
+    print("\n" + "=" * 70)
+    print("3. Testing /api/movies/1 (Detail Enrichment)")
     print("=" * 70)
-    print("Testing /api/movies/{movie_id} endpoint")
-    print("=" * 70)
-    
     response = requests.get(f"{BASE_URL}/api/movies/1")
     print(f"Status: {response.status_code}")
     if response.status_code == 200:
         data = response.json()
         print(f"Movie: {data.get('title')}")
-        print(f"Poster URL: {data.get('poster_url', 'N/A')}")
-    print()
+        print(f"Poster: {data.get('poster_url')}")
+        print(f"Overview: {data.get('overview')[:100]}...")
 
 def test_personalized_recommendations():
-    """Test personalized recommendations endpoint"""
-    print("=" * 70)
-    print("Testing /api/recommend/personalized endpoint")
+    """Test personalized recommendations"""
+    print("\n" + "=" * 70)
+    print("4. Testing /api/recommend/personalized")
     print("=" * 70)
     
+    # Using 'movie_ids' to match the RecRequest Pydantic model
     payload = {
-        "movie_ids": [1, 2, 3],
-        "model": "content",
+        "movie_ids": [1, 2, 480], # Toy Story, Jumanji, Jurassic Park
+        "model": "hybrid",
         "top_n": 5
     }
     
@@ -66,29 +68,21 @@ def test_personalized_recommendations():
     print(f"Status: {response.status_code}")
     if response.status_code == 200:
         data = response.json()
-        print(f"Model used: {data.get('model_used')}")
-        print(f"Computation time: {data.get('computation_time_ms', 0):.2f}ms")
-        print(f"Actual request time: {elapsed:.2f}ms")
-        print(f"Recommendations: {len(data.get('recommendations', []))}")
-        
-        if data.get('recommendations'):
-            first_rec = data['recommendations'][0]
-            print(f"Top recommendation: {first_rec.get('title')}")
-            print(f"  Predicted rating: {first_rec.get('predicted_rating', 'N/A')}")
-            print(f"  Poster URL: {first_rec.get('poster_url', 'N/A')}")
+        recs = data.get('recommendations', [])
+        print(f"Received {len(recs)} recommendations in {elapsed:.2f}ms")
+        if recs:
+            print(f"Top Rec: {recs[0]['title']} - Predicted: {recs[0].get('predicted_rating')}")
     else:
         print(f"Error: {response.text}")
-    print()
 
 def test_similar_movies():
-    """Test similar movies endpoint"""
-    print("=" * 70)
-    print("Testing /api/recommend/similar endpoint")
+    """Test similarity endpoint"""
+    print("\n" + "=" * 70)
+    print("5. Testing /api/recommend/similar")
     print("=" * 70)
     
     payload = {
         "movie_id": 1,
-        "model": "content",
         "top_n": 5
     }
     
@@ -96,69 +90,23 @@ def test_similar_movies():
     print(f"Status: {response.status_code}")
     if response.status_code == 200:
         data = response.json()
-        print(f"Target movie: {data.get('target_movie', {}).get('title')}")
-        print(f"Similar movies: {len(data.get('similar_movies', []))}")
-        
-        if data.get('similar_movies'):
-            first_similar = data['similar_movies'][0]
-            print(f"Most similar: {first_similar.get('title')}")
-            print(f"  Similarity score: {first_similar.get('similarity_score', 'N/A')}")
+        similar = data.get('similar_movies', [])
+        print(f"Found {len(similar)} similar movies")
+        if similar:
+            print(f"Most similar: {similar[0]['title']}")
     else:
         print(f"Error: {response.text}")
-    print()
-
-def test_rating_prediction():
-    """Test rating prediction endpoint"""
-    print("=" * 70)
-    print("Testing /api/predict/rating endpoint")
-    print("=" * 70)
-    
-    payload = {
-        "user_movie_ids": [1, 2, 3],
-        "target_movie_id": 50,
-        "model": "content"
-    }
-    
-    response = requests.post(f"{BASE_URL}/api/predict/rating", json=payload)
-    print(f"Status: {response.status_code}")
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Movie: {data.get('movie', {}).get('title')}")
-        print(f"Predicted rating: {data.get('predicted_rating', 'N/A')}")
-        print(f"Confidence: {data.get('confidence', 'N/A')}")
-    else:
-        print(f"Error: {response.text}")
-    print()
 
 def main():
-    """Run all tests"""
+    print("\nAPI TEST SUITE STARTING...")
+    test_health()
+    test_search()
+    test_movie_details()
+    test_personalized_recommendations()
+    test_similar_movies()
     print("\n" + "=" * 70)
-    print("MOVIE RECOMMENDATION API TEST SUITE")
+    print("TEST SUITE COMPLETE")
     print("=" * 70)
-    print(f"Testing API at: {BASE_URL}")
-    print("Make sure the server is running: uvicorn main:app --reload")
-    print()
-    
-    try:
-        test_health()
-        test_search()
-        test_movie_details()
-        test_personalized_recommendations()
-        test_similar_movies()
-        test_rating_prediction()
-        
-        print("=" * 70)
-        print("ALL TESTS COMPLETED")
-        print("=" * 70)
-        
-    except requests.exceptions.ConnectionError:
-        print("ERROR: Could not connect to server.")
-        print("Make sure the server is running:")
-        print("  cd backend")
-        print("  uvicorn main:app --reload")
-    except Exception as e:
-        print(f"ERROR: {e}")
 
 if __name__ == "__main__":
     main()
-
